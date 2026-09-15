@@ -1,0 +1,40 @@
+# Verified arXiv identifiers for paper/refs.bib.
+# Regenerate with:
+#   python scripts/verify_references.py --ids-file paper/refs_ids.txt \
+#       --dois 10.1038/s41586-023-06924-6 --out paper/refs.bib
+#
+# Variational algorithms, VQE and barren plateaus
+1304.3061
+1803.11173
+2012.09265
+2001.00550
+2405.00781
+# Gradient and optimizer foundations
+1803.00745
+1909.02108
+# Language models as optimizers
+2309.03409
+# Language models for quantum computing
+2502.13166
+2604.24283
+2603.23979
+2607.27262
+2505.06810
+2606.13380
+2504.16350
+2607.17498
+# Language models for quantum code and circuit generation
+2505.07711
+# Fine-tuning language models for quantum tasks
+2504.11109
+# Reinforcement learning and meta-learning for quantum control
+1803.01857
+1703.03400
+2508.18514
+# Explainability for quantum machine learning
+2412.14753
+2301.05549
+2405.08917
+2503.08962
+# Distilling black-box optimizers (generic, motivates the trained specialist)
+2609.09468

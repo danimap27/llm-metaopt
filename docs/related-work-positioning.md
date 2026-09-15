@@ -34,6 +34,25 @@ Related Work with an explicit statement of the difference.
 4. Latency accounting for the slow loop, including failed calls, which is the
    quantitative argument for supervising rather than iterating.
 
+## Candidate unoccupied directions
+
+Evidence from arXiv full-text searches run on 2026-09-15 (queries and hits are
+reproducible with `scripts/verify_references.py --search`).
+
+| Direction | Search evidence | Status |
+|---|---|---|
+| Supervision under non-stationary objectives (concept drift) | `"language model" AND "drift" AND "quantum"` returns only API-drift and secure-coding papers, none about a drifting variational objective | Empty |
+| Explanations of optimizer decisions validated by intervening | XAI for QML explains model predictions (`daskin2023explainability`, `power2024feature`, `rybotycki2025explainable`, `gilfuster2024opportunities`), nobody measures whether acting on the explanation produces the predicted effect | Empty |
+| Training the supervisor (fine-tuning or reinforcement learning with a physics reward) | Fine-tuning exists for circuit generation (`jern2025agent`) and quantum reasoning, not for supervising an optimizer | Empty in this domain |
+| Theory of when supervision pays | No cost-benefit or regret framework found for language-model supervision of numerical optimizers | Empty |
+| Classical drift detectors as the fair baseline | Page-Hinkley and ADWIN are standard in streaming learning and unused in this literature | Available and uncontested |
+
+Context for the trained-supervisor direction: `wu2026building` shows that unaided
+language models remain below strong classical optimizers in low-budget black-box
+optimization and that distilling a frozen text policy from practice recovers a
+large part of the gap (48% regret reduction). That is both the motivation and the
+template for a trained specialist in this paper.
+
 ## Reviewer expectations
 
 Expect requests to benchmark against Zhuang and Guan and against AutoQResearch.

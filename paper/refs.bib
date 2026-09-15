@@ -1,8 +1,9 @@
 % Bibliography for the LLM-MetaOpt paper.
 %
 % Every entry below was resolved against a public record and carries the source
-% URL in a % VERIFIED comment. Regenerate or extend with:
-%   python scripts/verify_references.py --ids ... --dois ... --out paper/refs.bib
+% URL in a % VERIFIED comment. Regenerate with:
+%   python scripts/verify_references.py --ids-file paper/refs_ids.txt \
+%       --dois 10.1038/s41586-023-06924-6 --out paper/refs.bib
 % Never add an entry that the script cannot resolve.
 
 @misc{peruzzo2013variational,
@@ -53,6 +54,18 @@
   % VERIFIED: http://arxiv.org/abs/2001.00550v3
 }
 
+@misc{larocca2024barren,
+  author       = {Martin Larocca and Supanut Thanasilp and Samson Wang and Kunal Sharma and Jacob Biamonte and Patrick J. Coles and Lukasz Cincio and Jarrod R. McClean and Zoë Holmes and M. Cerezo},
+  title        = {Barren Plateaus in Variational Quantum Computing},
+  year         = {2024},
+  eprint       = {2405.00781},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1038/s42254-025-00813-9},
+  note         = {Published as: Nature Reviews Physics 7, 174-189 (2025)},
+  % VERIFIED: http://arxiv.org/abs/2405.00781v2
+}
+
 @misc{mitarai2018quantum,
   author       = {Kosuke Mitarai and Makoto Negoro and Masahiro Kitagawa and Keisuke Fujii},
   title        = {Quantum Circuit Learning},
@@ -77,28 +90,6 @@
   % VERIFIED: http://arxiv.org/abs/1909.02108v3
 }
 
-@misc{larocca2024barren,
-  author       = {Martin Larocca and Supanut Thanasilp and Samson Wang and Kunal Sharma and Jacob Biamonte and Patrick J. Coles and Lukasz Cincio and Jarrod R. McClean and Zoë Holmes and M. Cerezo},
-  title        = {Barren Plateaus in Variational Quantum Computing},
-  year         = {2024},
-  eprint       = {2405.00781},
-  archivePrefix = {arXiv},
-  primaryClass = {quant-ph},
-  doi          = {10.1038/s42254-025-00813-9},
-  note         = {Published as: Nature Reviews Physics 7, 174-189 (2025)},
-  % VERIFIED: http://arxiv.org/abs/2405.00781v2
-}
-
-@misc{gilfuster2024opportunities,
-  author       = {Elies Gil-Fuster and Jonas R. Naujoks and Grégoire Montavon and Thomas Wiegand and Wojciech Samek and Jens Eisert},
-  title        = {Opportunities and limitations of explaining quantum machine learning},
-  year         = {2024},
-  eprint       = {2412.14753},
-  archivePrefix = {arXiv},
-  primaryClass = {quant-ph},
-  % VERIFIED: http://arxiv.org/abs/2412.14753v1
-}
-
 @misc{yang2023large,
   author       = {Chengrun Yang and Xuezhi Wang and Yifeng Lu and Hanxiao Liu and Quoc V. Le and Denny Zhou and Xinyun Chen},
   title        = {Large Language Models as Optimizers},
@@ -107,6 +98,109 @@
   archivePrefix = {arXiv},
   primaryClass = {cs.LG},
   % VERIFIED: http://arxiv.org/abs/2309.03409v3
+}
+
+@misc{zhuang2025large,
+  author       = {Jun Zhuang and Chaowen Guan},
+  title        = {Large Language Models Can Help Mitigate Barren Plateaus in Quantum Neural Networks},
+  year         = {2025},
+  eprint       = {2502.13166},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2502.13166v3
+}
+
+@misc{sharma2026autoqresearch,
+  author       = {Monit Sharma and Hoong Chuin Lau},
+  title        = {AutoQResearch: LLM-Guided Closed-Loop Policy Search for Adaptive Variational Quantum Optimization},
+  year         = {2026},
+  eprint       = {2604.24283},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2604.24283v2
+}
+
+@misc{nguyen2026bridg,
+  author       = {Ngoc Nhi Nguyen and Thai T Vu and John Le and Hoa Khanh Dam and Dung Hoang Duong and Dinh Thai Hoang},
+  title        = {BRIDG-Q: Barren-Plateau-Resilient Initialisation with Data-Aware LLM-Generated Quantum Circuits},
+  year         = {2026},
+  eprint       = {2603.23979},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.ET},
+  % VERIFIED: http://arxiv.org/abs/2603.23979v1
+}
+
+@misc{syah2026guided,
+  author       = {Riza Alaudin Syah and Irwan Alnarus Kautsar and Haza Nuzly Bin Abdull Hamed},
+  title        = {LLM-Guided Initialization for Accelerated Hybrid Quantum-Classical Medical Image Classification},
+  year         = {2026},
+  eprint       = {2607.27262},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1109/IAICT71158.2026.11620917},
+  % VERIFIED: http://arxiv.org/abs/2607.27262v1
+}
+
+@misc{jiang2025qseer,
+  author       = {Lei Jiang and Chi Zhang and Fan Chen},
+  title        = {QSeer: A Quantum-Inspired Graph Neural Network for Parameter Initialization in Quantum Approximate Optimization Algorithm Circuits},
+  year         = {2025},
+  eprint       = {2505.06810},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.ET},
+  % VERIFIED: http://arxiv.org/abs/2505.06810v1
+}
+
+@misc{sakka2026system,
+  author       = {Kenya Sakka and Wataru Mizukami and Kosuke Mitarai},
+  title        = {An LLM System for Autonomous Variational Quantum Circuit Design},
+  year         = {2026},
+  eprint       = {2606.13380},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2606.13380v1
+}
+
+@misc{tyagin2025qaoa,
+  author       = {Ilya Tyagin and Marwa H. Farag and Kyle Sherbert and Karunya Shirali and Yuri Alexeev and Ilya Safro},
+  title        = {QAOA-GPT: Efficient Generation of Adaptive and Regular Quantum Approximate Optimization Algorithm Circuits},
+  year         = {2025},
+  eprint       = {2504.16350},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2504.16350v1
+}
+
+@misc{chen2026driven,
+  author       = {Yu-Qin Chen and Shi-Xin Zhang},
+  title        = {LLM-Driven Cross-Paradigm Design for Quantum Optimal Control},
+  year         = {2026},
+  eprint       = {2607.17498},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2607.17498v1
+}
+
+@misc{sinha2025circuit,
+  author       = {Pranav Sinha and Sumit Kumar Jha and Sunny Raj},
+  title        = {Circuit Partitioning Using Large Language Models for Quantum Compilation and Simulations},
+  year         = {2025},
+  eprint       = {2505.07711},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.ET},
+  % VERIFIED: http://arxiv.org/abs/2505.07711v1
+}
+
+@misc{jern2025agent,
+  author       = {Linus Jern and Valter Uotila and Cong Yu and Bo Zhao},
+  title        = {Agent-Q: Fine-Tuning Large Language Models for Quantum Circuit Generation and Optimization},
+  year         = {2025},
+  eprint       = {2504.11109},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1109/QCE65121.2025.00179},
+  note         = {Published as: 2025 IEEE International Conference on Quantum Computing and Engineering (QCE), Albuquerque, NM, USA, 2025, pp. 1621-1632},
+  % VERIFIED: http://arxiv.org/abs/2504.11109v2
 }
 
 @misc{niu2018universal,
@@ -129,16 +223,6 @@
   % VERIFIED: http://arxiv.org/abs/1703.03400v3
 }
 
-@misc{zhuang2025large,
-  author       = {Jun Zhuang and Chaowen Guan},
-  title        = {Large Language Models Can Help Mitigate Barren Plateaus in Quantum Neural Networks},
-  year         = {2025},
-  eprint       = {2502.13166},
-  archivePrefix = {arXiv},
-  primaryClass = {quant-ph},
-  % VERIFIED: http://arxiv.org/abs/2502.13166v3
-}
-
 @misc{peng2025breaking,
   author       = {Yifeng Peng and Xinyi Li and Zhemin Zhang and Samuel Yen-Chi Chen and Zhiding Liang and Ying Wang},
   title        = {Breaking Through Barren Plateaus: Reinforcement Learning Initializations for Deep Variational Quantum Circuits},
@@ -149,75 +233,44 @@
   % VERIFIED: http://arxiv.org/abs/2508.18514v1
 }
 
-@misc{sharma2026autoqresearch,
-  author       = {Monit Sharma and Hoong Chuin Lau},
-  title        = {AutoQResearch: LLM-Guided Closed-Loop Policy Search for Adaptive Variational Quantum Optimization},
-  year         = {2026},
-  eprint       = {2604.24283},
+@misc{gilfuster2024opportunities,
+  author       = {Elies Gil-Fuster and Jonas R. Naujoks and Grégoire Montavon and Thomas Wiegand and Wojciech Samek and Jens Eisert},
+  title        = {Opportunities and limitations of explaining quantum machine learning},
+  year         = {2024},
+  eprint       = {2412.14753},
   archivePrefix = {arXiv},
   primaryClass = {quant-ph},
-  % VERIFIED: http://arxiv.org/abs/2604.24283v2
+  % VERIFIED: http://arxiv.org/abs/2412.14753v1
 }
 
-@misc{sakka2026system,
-  author       = {Kenya Sakka and Wataru Mizukami and Kosuke Mitarai},
-  title        = {An LLM System for Autonomous Variational Quantum Circuit Design},
-  year         = {2026},
-  eprint       = {2606.13380},
+@misc{daskin2023explainability,
+  author       = {Ammar Daskin},
+  title        = {On the explainability of quantum neural networks based on variational quantum circuits},
+  year         = {2023},
+  eprint       = {2301.05549},
   archivePrefix = {arXiv},
   primaryClass = {quant-ph},
-  % VERIFIED: http://arxiv.org/abs/2606.13380v1
+  % VERIFIED: http://arxiv.org/abs/2301.05549v3
 }
 
-@misc{jiang2025qseer,
-  author       = {Lei Jiang and Chi Zhang and Fan Chen},
-  title        = {QSeer: A Quantum-Inspired Graph Neural Network for Parameter Initialization in Quantum Approximate Optimization Algorithm Circuits},
+@misc{power2024feature,
+  author       = {Luke Power and Krishnendu Guha},
+  title        = {Feature Importance and Explainability in Quantum Machine Learning},
+  year         = {2024},
+  eprint       = {2405.08917},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LG},
+  % VERIFIED: http://arxiv.org/abs/2405.08917v1
+}
+
+@misc{rybotycki2025explainable,
+  author       = {Tomasz Rybotycki and Manish K. Gupta and Piotr Gawron},
+  title        = {Explainable Quantum Machine Learning for Multispectral Images Segmentation: Case Study},
   year         = {2025},
-  eprint       = {2505.06810},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.ET},
-  % VERIFIED: http://arxiv.org/abs/2505.06810v1
-}
-
-@misc{tyagin2025qaoa,
-  author       = {Ilya Tyagin and Marwa H. Farag and Kyle Sherbert and Karunya Shirali and Yuri Alexeev and Ilya Safro},
-  title        = {QAOA-GPT: Efficient Generation of Adaptive and Regular Quantum Approximate Optimization Algorithm Circuits},
-  year         = {2025},
-  eprint       = {2504.16350},
+  eprint       = {2503.08962},
   archivePrefix = {arXiv},
   primaryClass = {quant-ph},
-  % VERIFIED: http://arxiv.org/abs/2504.16350v1
-}
-
-@misc{syah2026guided,
-  author       = {Riza Alaudin Syah and Irwan Alnarus Kautsar and Haza Nuzly Bin Abdull Hamed},
-  title        = {LLM-Guided Initialization for Accelerated Hybrid Quantum-Classical Medical Image Classification},
-  year         = {2026},
-  eprint       = {2607.27262},
-  archivePrefix = {arXiv},
-  primaryClass = {quant-ph},
-  doi          = {10.1109/IAICT71158.2026.11620917},
-  % VERIFIED: http://arxiv.org/abs/2607.27262v1
-}
-
-@misc{nguyen2026bridg,
-  author       = {Ngoc Nhi Nguyen and Thai T Vu and John Le and Hoa Khanh Dam and Dung Hoang Duong and Dinh Thai Hoang},
-  title        = {BRIDG-Q: Barren-Plateau-Resilient Initialisation with Data-Aware LLM-Generated Quantum Circuits},
-  year         = {2026},
-  eprint       = {2603.23979},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.ET},
-  % VERIFIED: http://arxiv.org/abs/2603.23979v1
-}
-
-@misc{chen2026driven,
-  author       = {Yu-Qin Chen and Shi-Xin Zhang},
-  title        = {LLM-Driven Cross-Paradigm Design for Quantum Optimal Control},
-  year         = {2026},
-  eprint       = {2607.17498},
-  archivePrefix = {arXiv},
-  primaryClass = {quant-ph},
-  % VERIFIED: http://arxiv.org/abs/2607.17498v1
+  % VERIFIED: http://arxiv.org/abs/2503.08962v3
 }
 
 @article{romeraparedes2024mathematical,
@@ -230,4 +283,14 @@
   page      = {468-475},
   doi       = {10.1038/s41586-023-06924-6},
   % VERIFIED: https://api.crossref.org/works/10.1038/s41586-023-06924-6
+}
+
+@misc{wu2026building,
+  author       = {Yi Wu and Zheng Ren and Zhiyu Hu and Haochen Wang and Daryl Chang and Li Wei and Ting Wang and Zhen Li and Pooja Gupta and Nitin Jindal and Lukasz Heldt},
+  title        = {Building the Harness Automatically: Self-Play in Code Distills a Text Harness for Black-Box Optimization},
+  year         = {2026},
+  eprint       = {2609.09468},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LG},
+  % VERIFIED: https://arxiv.org/abs/2609.09468 (arXiv API rate limited, verified on the abstract page)
 }
