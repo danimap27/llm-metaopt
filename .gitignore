@@ -20,3 +20,6 @@ models/
 # Sistema
 .DS_Store
 *.log
+
+# Artefactos de agentes
+.hermes/
