@@ -45,3 +45,19 @@ def test_replay_only_mode_refuses_to_store(tmp_path):
     cache = ResponseCache(tmp_path / "cache.jsonl", replay_only=True)
     with pytest.raises(RuntimeError):
         cache.store({"model": "m"}, {"ok": True})
+
+
+def test_decide_cached_serves_from_disk_without_calling_the_endpoint(tmp_path):
+    from code.llm_client import LLMConfig, build_request_payload, decide_cached
+
+    cfg = LLMConfig(base_url="http://unreachable.invalid/v1", model="m")
+    cache = ResponseCache(tmp_path / "cache.jsonl")
+    window = {"n_window": 10, "improvement": 0.0, "grad_norm": {"last": 1e-5}}
+    cache.store(
+        build_request_payload(window, cfg),
+        {"ok": True, "latency_s": 1.0, "decision": {"diagnosis": "BARREN_PLATEAU"}},
+    )
+    response = decide_cached(window, cfg, cache)
+    assert response["cached"] is True
+    assert response["decision"]["diagnosis"] == "BARREN_PLATEAU"
+    assert len(cache) == 1

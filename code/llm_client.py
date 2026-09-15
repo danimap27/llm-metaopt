@@ -186,3 +186,23 @@ def decide(
                 }
             )
     return {"ok": False, "model": cfg.model, "latency_s": None, "decision": None, "attempts": attempts}
+
+
+def decide_cached(
+    window: Dict[str, Any],
+    cfg: LLMConfig,
+    cache: Any,
+    session: Optional[requests.Session] = None,
+) -> Dict[str, Any]:
+    """Cache-first decision: serve from disk when possible, else call and store.
+
+    ``cache`` is duck typed (any object with ``lookup`` and ``store``), which
+    keeps the replay path out of this module's import graph.
+    """
+    payload = build_request_payload(window, cfg)
+    hit = cache.lookup(payload)
+    if hit is not None:
+        return {**hit, "cached": True}
+    response = decide(window, cfg, session=session)
+    cache.store(payload, response)
+    return {**response, "cached": False}
