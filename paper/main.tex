@@ -1,0 +1,120 @@
+% LLM-MetaOpt -- paper skeleton.
+% Writing rules: American English, passive voice, no semicolons, no em dashes,
+% no bold or itemized lists inside main sections, external BibTeX file.
+% Compile with: latexmk -pdf main.tex   (or upload the folder to Overleaf)
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\title{Language Models as Heuristic Meta-Optimizers and Intelligent Initializers for Variational Quantum Algorithms with Integrated Explainability}
+\author{Daniel Mart\'in P\'erez\thanks{Data Science and Big Data Research Lab, Universidad Pablo de Olavide, Seville, Spain.}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Variational quantum algorithms are limited by non-convex optimization on noisy intermediate-scale hardware. Local optimizers stall on barren plateaus and on rough landscapes produced by physical noise, while calling a language model at every iteration is infeasible because of the input-output latency tax of hosted inference. This work studies a hybrid control architecture in which a language model supervises a fast local optimizer. The language model proposes the initial angles from the symbolic description of the problem and, every $N_w$ iterations, reads a telemetry window of the training run, reports a diagnostic label, justifies it and selects one macroscopic intervention. The intervention is limited to a scaling of the learning rate, a Gaussian perturbation of the variational angles and a restart. The study quantifies the effect of the controller on the final energy gap and separates it from the effect of perturbation alone with random, rule-based and learned classical controllers. Diagnosis accuracy is measured against simulator ground truth, and the latency budget of the slow loop is reported as a distribution. Experiments are carried out on Heisenberg, transverse-field Ising and XY models with two to four qubits under depolarizing noise of zero, two and five percent, using Qiskit and the statevector and density-matrix simulators.
+\end{abstract}
+
+\section{Introduction}
+% Motivation: NISQ limitations, gradient decay, optimization bottlenecks.
+% Gap: language models have been used to propose circuits and to act as
+% black-box optimizers, yet their use as supervisory meta-controllers of a
+% variational optimizer with an explicit explanation protocol is unexplored.
+% Contributions are listed in prose (no itemize), for example: (i) the fast-slow
+% loop formulation, (ii) the explainability protocol and its evaluation against
+% ground truth, (iii) an open benchmark with counterfactual labels, (iv) the
+% latency accounting.
+
+\section{Related Work}
+% Slots to fill with verified references (paper/refs.bib):
+% 1. Variational quantum algorithms and barren plateaus.
+% 2. Classical optimizers for VQAs and the parameter-shift rule.
+% 3. Language models as optimizers and black-box search controllers.
+% 4. Language models for quantum computing tasks.
+% 5. Reinforcement learning and meta-learning for quantum control.
+% 6. Explainability in quantum machine learning.
+
+\section{Background}
+\subsection{Variational quantum algorithms}
+% Hamiltonian H, ansatz U(theta), expectation value E(theta), parameter-shift rule.
+\begin{equation}
+E(\vec{\theta}) = \langle \psi(\vec{\theta}) \rvert H \lvert \psi(\vec{\theta}) \rangle = \mathrm{Tr}\left(\rho(\vec{\theta}) H\right)
+\end{equation}
+\subsection{Barren plateaus and local minima}
+\begin{equation}
+\mathrm{Var}\left[\partial_{\theta_i} E(\vec{\theta})\right] \sim \mathcal{O}(2^{-n})
+\end{equation}
+\subsection{Language models as optimizers}
+% OPRO-style prompting, evolutionary search with language models, and the
+% latency argument for supervising rather than iterating.
+
+\section{Method}
+\subsection{Fast-slow loop}
+% Algorithm 1: SPSA for N_w steps, query the controller, apply the action.
+\begin{algorithm}
+\caption{SPSA with a slow-loop controller}\label{alg:fastslow}
+\begin{algorithmic}[1]
+\Require initial angles $\vec{\theta}_0$, budget $T$, window $N_w$, controller $\mathcal{C}$
+\State $\eta \gets 1$
+\For{$k = 0$ \textbf{to} $T-1$}
+  \If{$k \bmod N_w = 0$ \textbf{and} $k > 0$}
+    \State $T_k \gets$ telemetry window of the last $N_w$ steps
+    \State $a \gets \mathcal{C}(T_k)$
+    \State $\vec{\theta}_k \gets \mathrm{intervene}(\vec{\theta}_k, a)$ and update $\eta$
+  \EndIf
+  \State $\vec{\theta}_{k+1} \gets \mathrm{SPSA\text{-}step}(\vec{\theta}_k, \eta)$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+\subsection{Telemetry window}
+\begin{equation}
+T_k = \left[E_{k-N_w \ldots k}, \lVert \nabla E \rVert_2, \eta_k, \mathrm{Var}(\vec{\theta})\right]
+\end{equation}
+\subsection{Explainability protocol}
+% Diagnosis, justification, intervention. Mention the JSON schema constraint and
+% that the reported label is compared with simulator ground truth.
+\subsection{Intervention space}
+\begin{equation}
+\vec{\theta}_{k+1} = \vec{\theta}_k - \eta_{\mathrm{LLM}} \, \hat{g}_k + \delta \, \mathcal{N}(0, I)
+\end{equation}
+
+\section{Experimental setup}
+% Problems, noise levels, seeds, conditions, statistics. Table 1 is generated by
+% code.aggregate and can be included directly:
+% \input{../results/tables/summary.tex}
+\subsection{Benchmarks}
+\subsection{Controllers and controls}
+\subsection{Statistical analysis}
+
+\section{Results}
+\subsection{Optimization quality}
+\subsection{Attribution to the controller}
+\subsection{Diagnosis accuracy against ground truth}
+\subsection{Latency and cost accounting}
+
+\section{Discussion}
+% When does the slow loop help, and when does it not. Sensitivity to N_w and to
+% the model. Cost-effectiveness of a trained specialist against a general model.
+
+\section{Limitations}
+% Simulator-only evidence, small qubit counts, single-family prompts, model
+% drift, prompt sensitivity, and the fact that the oracle controller is not
+% deployable.
+
+\section{Conclusion}
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}
