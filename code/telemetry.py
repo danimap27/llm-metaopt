@@ -1,25 +1,27 @@
-"""Construccion de la ventana de telemetria T_k y su serializacion JSON.
+"""Telemetry window ``T_k`` and its JSON serialization.
 
-El documento maestro define
+The paper defines
 
     T_k = [E_{k-N_w..k}, ||grad E||_2, eta_k, Var(theta)]
 
-Esta capa convierte el historial del bucle rapido en un diccionario compacto y
-con precision controlada, porque la precision de los floats dentro del prompt
-JSON es una de las limitaciones declaradas del paper.
+This module turns the fast-loop history into a compact dictionary with
+controlled numerical precision, because float precision inside JSON prompts is
+one of the declared limitations of the method.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
+
+ArrayLike = Union[np.ndarray, Sequence[float]]
 
 DEFAULT_SIGNIFICANT_DIGITS = 4
 
 
 def compact_float(value: float, significant_digits: int = DEFAULT_SIGNIFICANT_DIGITS) -> float:
-    """Redondeo a cifras significativas (evita colas de decimales en el prompt)."""
+    """Round to significant digits (avoids long decimal tails inside prompts)."""
     value = float(value)
     if not np.isfinite(value):
         return float("nan")
@@ -28,16 +30,18 @@ def compact_float(value: float, significant_digits: int = DEFAULT_SIGNIFICANT_DI
     return float(f"%.{significant_digits}g" % value)
 
 
-def window_slice(history: Sequence[Dict[str, float]], end_index: int, n_window: int) -> List[Dict[str, float]]:
-    """Ventana [end_index - n_window + 1, end_index] del historial."""
+def window_slice(history: Sequence[Dict[str, object]], end_index: int, n_window: int) -> List[Dict[str, object]]:
+    """Slice ``[end_index - n_window + 1, end_index]`` out of the history."""
     start = max(0, end_index - n_window + 1)
     return list(history[start : end_index + 1])
 
 
-def summarize_window(records: Sequence[Dict[str, float]]) -> Dict[str, float]:
-    """Estadisticos de la ventana: energia, gradiente y progreso."""
-    energies = np.asarray([r["energy"] for r in records], dtype=float)
-    grad_norms = np.asarray([r["grad_norm"] for r in records if np.isfinite(r["grad_norm"])], dtype=float)
+def summarize_window(records: Sequence[Dict[str, object]]) -> Dict[str, float]:
+    """Window statistics: energy, gradient and progress."""
+    energies = np.asarray([float(r["energy"]) for r in records], dtype=float)
+    grad_norms = np.asarray(
+        [float(r["grad_norm"]) for r in records if np.isfinite(float(r["grad_norm"]))], dtype=float
+    )
     steps = np.arange(energies.size, dtype=float)
     slope = float(np.polyfit(steps, energies, 1)[0]) if energies.size > 1 else 0.0
     return {
@@ -56,19 +60,19 @@ def summarize_window(records: Sequence[Dict[str, float]]) -> Dict[str, float]:
 
 
 def build_window(
-    history: Sequence[Dict[str, float]],
+    history: Sequence[Dict[str, object]],
     end_index: int,
     n_window: int,
     eta_scale: float = 1.0,
-    theta: Sequence[float] | None = None,
+    theta: Optional[ArrayLike] = None,
 ) -> Dict[str, object]:
-    """Ventana de telemetria lista para el prompt y para el dataset."""
+    """Telemetry window ready for the prompt and for the dataset."""
     records = window_slice(history, end_index, n_window)
     summary = summarize_window(records)
     window: Dict[str, object] = {
         "n_window": int(n_window),
-        "step_end": int(history[end_index]["step"]),
-        "energy_series": [compact_float(r["energy"]) for r in records],
+        "step_end": int(history[end_index]["step"]),  # type: ignore[arg-type]
+        "energy_series": [compact_float(float(r["energy"])) for r in records],
         "energy": {
             "first": summary["energy_first"],
             "last": summary["energy_last"],
@@ -84,17 +88,17 @@ def build_window(
             "max": summary["grad_norm_max"],
         },
         "eta": {
-            "a_k_last": compact_float(history[end_index]["a_k"]),
-            "c_k_last": compact_float(history[end_index]["c_k"]),
+            "a_k_last": compact_float(float(history[end_index]["a_k"])),  # type: ignore[arg-type]
+            "c_k_last": compact_float(float(history[end_index]["c_k"])),  # type: ignore[arg-type]
             "eta_scale": float(eta_scale),
         },
     }
     if theta is not None:
-        theta = np.asarray(theta, dtype=float)
+        theta_array = np.asarray(theta, dtype=float)
         window["theta"] = {
-            "var": compact_float(np.var(theta)),
-            "mean_abs": compact_float(np.mean(np.abs(theta))),
-            "max_abs": compact_float(np.max(np.abs(theta))),
-            "dim": int(theta.size),
+            "var": compact_float(np.var(theta_array)),
+            "mean_abs": compact_float(np.mean(np.abs(theta_array))),
+            "max_abs": compact_float(np.max(np.abs(theta_array))),
+            "dim": int(theta_array.size),
         }
     return window

@@ -1,58 +1,59 @@
 # LLM-MetaOpt
 
-Codigo experimental del paper *Language Models as Heuristic Meta-Optimizers and Intelligent Initializers for Variational Quantum Algorithms with Integrated Explainability*.
+Experimental code for the paper *Language Models as Heuristic Meta-Optimizers and Intelligent Initializers for Variational Quantum Algorithms with Integrated Explainability*.
 
-Documento maestro y estado del paper: `~/Obsidian/quantum-homelab/10-Projects/llm-metaopt/index.md`
+Master document and paper status (Spanish notes): `~/Obsidian/quantum-homelab/10-Projects/llm-metaopt/index.md`
 
 ## Idea
 
-Arquitectura de doble bucle (fast-slow loop) para la optimizacion no convexa de VQAs en era NISQ:
+A fast-slow loop architecture for non-convex optimization of variational quantum algorithms in the NISQ era:
 
-1. **Warm-start**: un LLM lee la descripcion simbolica del Hamiltoniano y propone `theta_0`.
-2. **Bucle rapido**: SPSA ejecuta `N_w` epocas a velocidad de milisegundos.
-3. **Bucle lento**: cada `N_w` epocas el LLM recibe la telemetria `T_k`, diagnostica el regimen
-   (convergencia, barren plateau, minimo local, meseta) y decide una intervencion
-   (ajustar `eta`, inyectar ruido, reiniciar).
+1. **Warm start**: an LLM reads the symbolic description of the Hamiltonian and proposes `theta_0`.
+2. **Fast loop**: SPSA runs `N_w` epochs at millisecond speed.
+3. **Slow loop**: every `N_w` epochs the LLM receives the telemetry window `T_k`, diagnoses the optimization regime (convergence, barren plateau, local minimum, energy plateau) and decides a macroscopic intervention (scale the learning rate, inject a Gaussian perturbation, restart).
 
-## Estructura
+## Layout
 
 ```
 code/
-  vqe.py         Hamiltonianos (Heisenberg, TFIM, XY), ansatz y energias exactas
-  optimizer.py   Bucle rapido SPSA + aplicacion de intervenciones
-  telemetry.py   Construccion de la ventana de telemetria T_k y su serializacion JSON
-  regimes.py     Diagnostico de regimen con ground-truth de simulador
-  labeler.py     Etiquetado contrafactual de la mejor intervencion (bandit)
-  llm_client.py  Cliente del bucle lento (Ollama / OpenAI-compatible) con latencia y JSON schema
-  sweep.py       CLI de generacion de datos (compatible con array jobs de Hercules)
+  vqe.py         Hamiltonians (Heisenberg, TFIM, XY), ansatz and exact energies
+  optimizer.py   SPSA fast loop and intervention application
+  telemetry.py   Telemetry window T_k and its JSON serialization
+  regimes.py     Regime diagnosis with simulator ground truth
+  labeler.py     Counterfactual labeling of the best intervention (bandit)
+  policy.py      Classical baseline policies trained on the same telemetry
+  llm_client.py  Slow-loop client (Ollama or any OpenAI-compatible endpoint)
+  experiment.py  Closed-loop runner: SPSA vs SPSA+LLM with baselines
+  sweep.py       Dataset generation CLI (HPC array-job friendly)
+  stats.py       Statistics for the paper tables (bootstrap CI, paired tests)
+  aggregate.py   Result aggregation and LaTeX table generation
 configs/
-  default.yaml   Configuracion por defecto del barrido
+  default.yaml   Default sweep configuration
 tests/
-  test_smoke.py  Tests rapidos del pipeline
+  test_smoke.py  Fast end-to-end pipeline tests
+docs/
+  dataset-schema.md   Dataset field reference
+  experiment-protocol.md  Pre-registered experiment protocol
+paper/
+  main.tex       Paper skeleton (English)
+  refs.bib       Bibliography
 ```
 
-## Uso
+## Usage
 
 ```bash
-# Entorno
-uv venv .venv --python 3.12
-uv pip install --python .venv/bin/python -r requirements.txt
+make install            # create the venv and install dependencies
+make test               # run the fast test suite
+make sweep              # small local dataset generation
 
-# Tests
-make test
-
-# Generar datos (barrido local pequeno)
-make sweep
-
-# Un shard (para Hercules: array job)
+# One shard (HPC array jobs): 
 .venv/bin/python -m code.sweep --config configs/default.yaml --shard 0 --nshards 1
 ```
 
-## Reglas del proyecto
+## Project rules
 
-- Framework cuantico unico: **Qiskit 2.x + qiskit-aer** (nada de PennyLane).
-
-- Todos los experimentos son reproducibles: semilla fija, `temperature=0` en el LLM y quant/hash del modelo anotados.
-- Los datos crudos van a `data/` (no versionado); los resultados agregados a `results/`.
-- El paper se escribe en ingles americano (reglas del vault). Este repo mantiene comentarios y docs en espanol.
-- Cada cambio se commitea de forma atomica.
+- Single quantum framework: **Qiskit 2.x + qiskit-aer**.
+- Every experiment is reproducible: fixed seeds, `temperature=0` for the LLM, and the exact model tag and quantization recorded with the results.
+- Code, comments, docs and commit messages are written in English. The Obsidian notes stay in Spanish.
+- Raw data goes to `data/` and aggregated results to `results/` (both untracked).
+- One atomic commit per logical change, pushed after every commit.

@@ -1,13 +1,13 @@
-"""Generador de datos del Bloque 1: barrido SPSA + etiquetado contrafactual.
+"""Dataset generation: SPSA sweep with counterfactual labeling.
 
-Cada run combina un Hamiltoniano, un numero de qubits, un nivel de ruido y una
-semilla. Se ejecuta SPSA registrando la telemetria de cada ventana; al cerrar
-cada ventana se diagnostica el regimen con ground-truth de simulador y, si no ha
-convergido, se etiqueta la mejor intervencion contrafactual.
+Each run combines one Hamiltonian, qubit count, noise level and seed. SPSA is
+executed while recording the telemetry of every window. At each window boundary
+the regime is diagnosed against simulator ground truth and, when the run has not
+converged, the best counterfactual intervention is labeled.
 
-Salida: JSONL con un registro por ventana y un registro final por run.
-Compatible con array jobs de Hercules (``--shard i --nshards N``) y reanudable
-(los ``run_id`` ya presentes en el fichero de salida se saltan).
+Output: JSONL with one record per window plus one summary record per run.
+Shard-aware (``--shard i --nshards N``) and resumable (runs already present in
+the output file are skipped), so it can be launched as an HPC array job.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def load_config(path: str | pathlib.Path) -> Dict[str, Any]:
 
 
 def build_runs(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Producto cartesiano Hamiltoniano x qubits x ruido x semilla."""
+    """Cartesian product Hamiltonian x qubits x noise x seed."""
     sweep = cfg["sweep"]
     runs: List[Dict[str, Any]] = []
     for hamiltonian, n_qubits, noise_p, seed in product(
@@ -57,7 +57,7 @@ def build_runs(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _clean_nan(value: Any) -> Any:
-    """Convierte NaN/Inf en None para que el JSONL sea JSON estricto."""
+    """Turn NaN/Inf into None so the JSONL stays strict JSON."""
     if isinstance(value, dict):
         return {k: _clean_nan(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -73,7 +73,7 @@ def _write(handle, record: Dict[str, Any]) -> None:
 
 
 def read_done_run_ids(path: pathlib.Path) -> set[str]:
-    """Reanudacion: run_id ya presentes en el fichero de salida."""
+    """Resume support: run identifiers already present in the output file."""
     done: set[str] = set()
     if not path.exists():
         return done
@@ -89,7 +89,7 @@ def read_done_run_ids(path: pathlib.Path) -> set[str]:
 
 
 def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
-    """Ejecuta un run completo y escribe sus registros."""
+    """Execute one run and write its records."""
     n_qubits = run["n_qubits"]
     n_layers = run["n_layers"]
     hamiltonian = vqe.build_hamiltonian(run["hamiltonian"], n_qubits)
@@ -133,10 +133,10 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
             n_directions=regime_cfg.n_directions,
         )
         diagnosis = diagnose(
-            energy=history[end_index]["energy"],
+            energy=float(history[end_index]["energy"]),
             e_min=e_min,
-            window_improvement=window["improvement"],
-            grad_norm_last=window["grad_norm"]["last"],
+            window_improvement=float(window["improvement"]),
+            grad_norm_last=float(window["grad_norm"]["last"]),  # type: ignore[index]
             grad_var=grad_var,
             cfg=regime_cfg,
         )
@@ -146,7 +146,7 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
             "meta": meta,
             "step": history[end_index]["step"],
             "energy": history[end_index]["energy"],
-            "gap": history[end_index]["energy"] - e_min,
+            "gap": float(history[end_index]["energy"]) - e_min,
             "window": window,
             "diagnosis": diagnosis,
         }
@@ -168,8 +168,8 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
         "run_id": run["run_id"],
         "meta": meta,
         "final_energy": out["final_energy"],
-        "final_gap": out["final_energy"] - e_min,
-        "converged": bool(abs(out["final_energy"] - e_min) <= regime_cfg.tol_ok),
+        "final_gap": float(out["final_energy"]) - e_min,
+        "converged": bool(abs(float(out["final_energy"]) - e_min) <= regime_cfg.tol_ok),
         "labels": labels_written,
         "wall_s": wall_s,
     }
@@ -178,13 +178,13 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Barrido SPSA + etiquetado contrafactual (LLM-MetaOpt)")
+    parser = argparse.ArgumentParser(description="SPSA sweep with counterfactual labeling (LLM-MetaOpt)")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--out", default="data/sweep.jsonl")
-    parser.add_argument("--limit", type=int, default=0, help="maximo de runs de este shard")
+    parser.add_argument("--limit", type=int, default=0, help="maximum runs in this shard")
     parser.add_argument("--shard", type=int, default=0)
     parser.add_argument("--nshards", type=int, default=1)
-    parser.add_argument("--dry-run", action="store_true", help="solo lista los runs")
+    parser.add_argument("--dry-run", action="store_true", help="list the runs only")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -200,18 +200,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     done = read_done_run_ids(out_path)
     pending = [run for run in runs if run["run_id"] not in done]
-    print(f"[sweep] shard {args.shard}/{args.nshards}: {len(pending)} runs pendientes de {len(runs)}")
+    print(f"[sweep] shard {args.shard}/{args.nshards}: {len(pending)} pending runs out of {len(runs)}")
 
     with out_path.open("a", encoding="utf-8") as handle:
         for index, run in enumerate(pending, start=1):
             summary = run_one(run, cfg, handle)
             print(
                 f"[{index}/{len(pending)}] {summary['run_id']}: "
-                f"E_final={summary['final_energy']:.4f} gap={summary['final_gap']:.4f} "
+                f"E_final={float(summary['final_energy']):.4f} gap={float(summary['final_gap']):.4f} "
                 f"converged={summary['converged']} labels={summary['labels']} "
-                f"({summary['wall_s']:.1f}s)"
+                f"({float(summary['wall_s']):.1f}s)"
             )
-    print(f"[sweep] salida: {out_path}")
+    print(f"[sweep] output: {out_path}")
     return 0
 
 

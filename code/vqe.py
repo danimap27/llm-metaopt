@@ -1,19 +1,19 @@
-"""Hamiltonianos, ansatz variacional y evaluacion de energia (solo Qiskit).
+"""Hamiltonians, variational ansatz and energy evaluation (Qiskit only).
 
-Convenciones
-------------
-- El qubit i corresponde al wire i del QuantumCircuit.
-- Los Hamiltonianos se construyen con ``SparsePauliOp.from_sparse_list`` para
-  evitar la ambiguedad de orden de los strings de Pauli.
-- Sin ruido la energia se evalua con ``Statevector`` (exacta).
-- Con ruido se evalua con ``AerSimulator`` + ``NoiseModel`` (canal despolarizante
-  por puerta) usando ``save_expectation_value``: el resultado es exacto bajo el
-  modelo de ruido, sin error de muestreo.
+Conventions
+-----------
+- Qubit ``i`` maps to wire ``i`` of the ``QuantumCircuit``.
+- Hamiltonians are built with ``SparsePauliOp.from_sparse_list`` so that qubit
+  indices are explicit and never depend on Pauli-string ordering.
+- Without noise the energy is evaluated with ``Statevector`` (exact).
+- With noise the energy is evaluated with ``AerSimulator`` and a depolarizing
+  ``NoiseModel`` through ``save_expectation_value``: the result is exact under
+  the noise model, with no sampling error.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -22,15 +22,15 @@ from qiskit.quantum_info import SparsePauliOp, Statevector
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel, depolarizing_error
 
-ArrayLike = Sequence[float]
+ArrayLike = Union[np.ndarray, Sequence[float]]
 
 
 # --------------------------------------------------------------------------- #
-# Hamiltonianos
+# Hamiltonians
 # --------------------------------------------------------------------------- #
 
 def _pairs(n_qubits: int, periodic: bool) -> List[Tuple[int, int]]:
-    """Pares de qubits del entrelazado (cadena abierta o anillo)."""
+    """Coupling pairs for the entangling layer (open chain or ring)."""
     pairs = [(i, i + 1) for i in range(n_qubits - 1)]
     if periodic and n_qubits > 2:
         pairs.append((n_qubits - 1, 0))
@@ -64,7 +64,8 @@ def heisenberg_hamiltonian(
 ) -> SparsePauliOp:
     """H = sum_<ij> (jx XiXj + jy YiYj + jz ZiZj).
 
-    Para n_qubits=2 y J=1 el minimo exacto es -3 (Caso 1 del documento maestro).
+    For ``n_qubits=2`` and unit couplings the exact minimum is -3, which is the
+    reference case of the paper.
     """
     terms = _two_body_terms(n_qubits, jx, jy, jz, periodic)
     return SparsePauliOp.from_sparse_list(terms, num_qubits=n_qubits)
@@ -76,7 +77,7 @@ def tfim_hamiltonian(
     h: float = 1.0,
     periodic: bool = False,
 ) -> SparsePauliOp:
-    """Transverse-field Ising: H = -j sum_<ij> ZiZj - h sum_i Xi."""
+    """Transverse-field Ising model: H = -j sum_<ij> ZiZj - h sum_i Xi."""
     terms = _two_body_terms(n_qubits, 0.0, 0.0, -j, periodic)
     terms += [("X", [i], -h) for i in range(n_qubits)]
     return SparsePauliOp.from_sparse_list(terms, num_qubits=n_qubits)
@@ -88,7 +89,7 @@ def xy_hamiltonian(
     jy: float = 1.0,
     periodic: bool = False,
 ) -> SparsePauliOp:
-    """Modelo XY: H = sum_<ij> (jx XiXj + jy YiYj)."""
+    """XY model: H = sum_<ij> (jx XiXj + jy YiYj)."""
     terms = _two_body_terms(n_qubits, jx, jy, 0.0, periodic)
     return SparsePauliOp.from_sparse_list(terms, num_qubits=n_qubits)
 
@@ -101,9 +102,9 @@ HAMILTONIANS: Dict[str, Callable[..., SparsePauliOp]] = {
 
 
 def build_hamiltonian(name: str, n_qubits: int, **kwargs) -> SparsePauliOp:
-    """Constructor por nombre (el nombre aparece en los metadatos del dataset)."""
+    """Build a Hamiltonian by name (the name is recorded in dataset metadata)."""
     if name not in HAMILTONIANS:
-        raise ValueError(f"Hamiltoniano desconocido: {name!r}. Opciones: {sorted(HAMILTONIANS)}")
+        raise ValueError(f"Unknown Hamiltonian: {name!r}. Options: {sorted(HAMILTONIANS)}")
     return HAMILTONIANS[name](n_qubits, **kwargs)
 
 
@@ -112,10 +113,10 @@ def build_hamiltonian(name: str, n_qubits: int, **kwargs) -> SparsePauliOp:
 # --------------------------------------------------------------------------- #
 
 def build_ansatz(n_qubits: int, n_layers: int) -> Tuple[QuantumCircuit, ParameterVector]:
-    """Ansatz hardware-efficient: Rot(rx, ry, rz) por qubit + CX en escalera.
+    """Hardware-efficient ansatz: Rot(rx, ry, rz) per qubit plus ladder CX.
 
-    Orden de parametros: (capa, qubit, rotacion). Cada capa aplica las tres
-    rotaciones de la esfera de Bloch seguidas del entrelazado.
+    Parameter order is (layer, qubit, rotation). Each layer applies the three
+    Bloch-sphere rotations of every qubit and then the entangling ladder.
     """
     params = ParameterVector("theta", n_layers * n_qubits * 3)
     circuit = QuantumCircuit(n_qubits)
@@ -138,16 +139,16 @@ def parameter_count(n_qubits: int, n_layers: int) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# Energia
+# Energies
 # --------------------------------------------------------------------------- #
 
 def exact_ground_energy(hamiltonian: SparsePauliOp) -> float:
-    """Minimo exacto por diagonalizacion (solo valido para pocos qubits)."""
+    """Exact minimum by dense diagonalization (small qubit counts only)."""
     return float(np.linalg.eigvalsh(hamiltonian.to_matrix())[0])
 
 
 def depolarizing_noise_model(p: float) -> NoiseModel:
-    """Modelo de ruido: despolarizante de 1 qubit en rotaciones y de 2 en CX."""
+    """Noise model: single-qubit depolarizing on rotations and two-qubit on CX."""
     model = NoiseModel()
     model.add_all_qubit_quantum_error(depolarizing_error(p, 1), ["rx", "ry", "rz"])
     model.add_all_qubit_quantum_error(depolarizing_error(p, 2), ["cx"])
@@ -160,10 +161,11 @@ def make_energy_fn(
     n_layers: int,
     noise_p: float = 0.0,
 ) -> Callable[[ArrayLike], float]:
-    """Devuelve E(theta) = <psi(theta)|H|psi(theta)>.
+    """Return E(theta) = <psi(theta)|H|psi(theta)>.
 
-    Con ``noise_p == 0`` usa simulacion de vector de estado. Con ruido usa
-    AerSimulator con el modelo despolarizante (matriz densidad).
+    With ``noise_p == 0`` the statevector simulator is used. With noise, the
+    expectation value is computed on ``AerSimulator`` under the depolarizing
+    model, which is exact for the density-matrix method.
     """
     circuit, params = build_ansatz(n_qubits, n_layers)
     wires = list(range(n_qubits))
@@ -180,7 +182,7 @@ def make_energy_fn(
 
     def energy_noisy(theta: ArrayLike) -> float:
         bound = circuit.assign_parameters(dict(zip(params, np.asarray(theta, dtype=float)))).copy()
-        bound.save_expectation_value(hamiltonian, wires)
+        bound.save_expectation_value(hamiltonian, wires)  # type: ignore[attr-defined]
         result = backend.run(bound).result()
         return float(np.real(result.data(0)["expectation_value"]))
 
@@ -192,7 +194,7 @@ def parameter_shift_gradient(
     theta: ArrayLike,
     shift: float = np.pi / 2,
 ) -> np.ndarray:
-    """Gradiente exacto por parameter-shift (valido para rx, ry, rz)."""
+    """Exact parameter-shift gradient (valid for rx, ry and rz generators)."""
     theta = np.asarray(theta, dtype=float)
     grad = np.zeros_like(theta)
     for i in range(theta.size):
@@ -210,6 +212,6 @@ def random_initial_theta(
     n_layers: int,
     scale: float = 0.5,
 ) -> np.ndarray:
-    """Inicializacion aleatoria theta ~ U(-pi*scale, pi*scale)."""
+    """Random initialization theta ~ U(-pi*scale, pi*scale)."""
     size = parameter_count(n_qubits, n_layers)
     return rng.uniform(-np.pi * scale, np.pi * scale, size=size)

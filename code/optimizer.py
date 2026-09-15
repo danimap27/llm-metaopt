@@ -1,21 +1,24 @@
-"""Bucle rapido: SPSA y aplicacion de intervenciones del bucle lento.
+"""Fast loop: SPSA and application of slow-loop interventions.
 
-El optimizador local es SPSA (Simultaneous Perturbation Stochastic
-Approximation), el mismo que usa el documento maestro:
+The local optimizer is SPSA (Simultaneous Perturbation Stochastic
+Approximation), matching the paper's notation:
 
     theta_{k+1} = theta_k - a_k * g_hat(theta_k)
 
-con esquemas de decaimiento
+with the standard decay schedules
     a_k = a / (k + 1 + A)^alpha        c_k = c / (k + 1)^gamma
 
-y gradiente de dos evaluaciones
+and the two-evaluation gradient estimate
     g_hat_i = (E(theta + c_k * Delta) - E(theta - c_k * Delta)) / (2 c_k * Delta_i)
+
+``spsa_step`` exposes a single iteration so the closed-loop runner can interleave
+slow-loop interventions with fast-loop steps.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -24,7 +27,7 @@ ArrayLike = Union[np.ndarray, Sequence[float]]
 
 @dataclass
 class SPSAConfig:
-    """Hiperparametros del bucle rapido."""
+    """Fast-loop hyperparameters."""
 
     steps: int = 200
     a: float = 0.25
@@ -38,10 +41,38 @@ class SPSAConfig:
         return asdict(self)
 
 
-def _schedules(cfg: SPSAConfig, k: int, eta_scale: float) -> tuple[float, float]:
+def schedules(cfg: SPSAConfig, k: int, eta_scale: float = 1.0) -> Tuple[float, float]:
+    """Step-size and perturbation schedules at iteration ``k``."""
     a_k = eta_scale * cfg.a / (k + 1.0 + cfg.A) ** cfg.alpha
     c_k = cfg.c / (k + 1.0) ** cfg.gamma
     return a_k, c_k
+
+
+def spsa_step(
+    energy_fn: Callable[[ArrayLike], float],
+    theta: ArrayLike,
+    cfg: SPSAConfig,
+    k: int,
+    rng: np.random.Generator,
+    eta_scale: float = 1.0,
+) -> Tuple[np.ndarray, Dict[str, object]]:
+    """One SPSA iteration: gradient estimate plus parameter update."""
+    theta = np.asarray(theta, dtype=float)
+    a_k, c_k = schedules(cfg, k, eta_scale)
+    delta = rng.choice([-1.0, 1.0], size=theta.size)
+    e_plus = float(energy_fn(theta + c_k * delta))
+    e_minus = float(energy_fn(theta - c_k * delta))
+    g_hat = (e_plus - e_minus) / (2.0 * c_k) * delta
+    theta_next = theta - a_k * g_hat
+    record: Dict[str, object] = {
+        "step": k,
+        "energy": 0.5 * (e_plus + e_minus),
+        "grad_norm": float(np.linalg.norm(g_hat)),
+        "a_k": a_k,
+        "c_k": c_k,
+        "theta": theta_next.tolist(),
+    }
+    return theta_next, record
 
 
 def run_spsa(
@@ -51,15 +82,14 @@ def run_spsa(
     eta_scale: float = 1.0,
     steps: Optional[int] = None,
     seed: Optional[int] = None,
-    on_step: Optional[Callable[[int, Dict[str, float], np.ndarray], None]] = None,
+    on_step: Optional[Callable[[int, Dict[str, object], np.ndarray], None]] = None,
 ) -> Dict[str, object]:
-    """Ejecuta SPSA desde ``theta0``.
+    """Run SPSA from ``theta0``.
 
-    Devuelve ``theta`` final, ``history`` (una entrada por paso, con la instantanea
-    de los angulos) y la energia final. ``seed`` fija la secuencia de
-    perturbaciones Rademacher: dos runs con la misma semilla comparan candidatos
-    de intervencion bajo el mismo ruido de medida, que es lo que necesita el
-    etiquetado contrafactual.
+    Returns the final ``theta``, the per-step ``history`` (with angle snapshots)
+    and the final energy. ``seed`` fixes the Rademacher perturbation stream, so
+    two runs with the same seed compare intervention candidates under identical
+    measurement noise, which is what the counterfactual labeling needs.
     """
     rng = np.random.default_rng(cfg.seed if seed is None else seed)
     theta = np.asarray(theta0, dtype=float).copy()
@@ -67,21 +97,7 @@ def run_spsa(
     history: List[Dict[str, object]] = []
 
     for k in range(n_steps):
-        a_k, c_k = _schedules(cfg, k, eta_scale)
-        delta = rng.choice([-1.0, 1.0], size=theta.size)
-        e_plus = float(energy_fn(theta + c_k * delta))
-        e_minus = float(energy_fn(theta - c_k * delta))
-        g_hat = (e_plus - e_minus) / (2.0 * c_k) * delta
-        theta = theta - a_k * g_hat
-        energy = 0.5 * (e_plus + e_minus)
-        record: Dict[str, object] = {
-            "step": k,
-            "energy": energy,
-            "grad_norm": float(np.linalg.norm(g_hat)),
-            "a_k": a_k,
-            "c_k": c_k,
-            "theta": theta.tolist(),
-        }
+        theta, record = spsa_step(energy_fn, theta, cfg, k, rng, eta_scale)
         history.append(record)
         if on_step is not None:
             on_step(k, record, theta)
@@ -108,11 +124,11 @@ def apply_intervention(
     rng: Optional[np.random.Generator] = None,
     init_scale: float = 0.5,
 ) -> np.ndarray:
-    """Aplica una accion del bucle lento a los parametros.
+    """Apply one slow-loop action to the variational parameters.
 
-    - ``eta_scale``: multiplicador de la tasa de aprendizaje (lo consume SPSA).
-    - ``noise_sigma``: inyeccion gaussiana N(0, sigma^2) para romper simetrias.
-    - ``restart``: reinicio completo de los angulos.
+    - ``eta_scale``: multiplicative factor on the SPSA step size.
+    - ``noise_sigma``: Gaussian injection N(0, sigma^2) that breaks symmetries.
+    - ``restart``: full re-initialization of the angles.
     """
     rng = np.random.default_rng() if rng is None else rng
     theta = np.asarray(theta, dtype=float)

@@ -1,9 +1,9 @@
-"""Cliente del bucle lento: el LLM como meta-optimizador.
+"""Slow-loop client: the LLM as meta-optimizer.
 
-Compatible con cualquier endpoint OpenAI (Ollama local, vLLM, OpenRouter...).
-Registra la latencia por consulta, que es la magnitud central del paper, y pide
-salida estructurada con JSON schema. El prompt de sistema esta en ingles porque
-se publicara tal cual en el paper (reglas de escritura del vault).
+Works with any OpenAI-compatible endpoint (local Ollama, vLLM, OpenRouter).
+It records the per-call latency, which is the central quantity of the paper, and
+requests structured output through a JSON schema. The system prompt is kept in
+English because it is published verbatim in the paper.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ Rules: answer with JSON only, follow the schema, keep justification under two se
 
 @dataclass
 class LLMConfig:
-    """Configuracion del endpoint y del muestreo (reproducibilidad)."""
+    """Endpoint and sampling configuration (reproducibility)."""
 
     base_url: str = "http://localhost:11434/v1"
     model: str = "qwen3.5:4b"
@@ -86,7 +86,7 @@ class LLMConfig:
 
 
 def build_messages(window: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Mensajes del prompt: sistema + telemetria serializada."""
+    """Prompt messages: system prompt plus the serialized telemetry window."""
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(window, ensure_ascii=False, sort_keys=True)},
@@ -98,7 +98,7 @@ def build_request_payload(
     cfg: LLMConfig,
     use_json_schema: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """Payload OpenAI-compatible (inspeccionable sin red, se usa en los tests)."""
+    """OpenAI-compatible payload (inspectable offline, used by the tests)."""
     schema = cfg.use_json_schema if use_json_schema is None else use_json_schema
     payload: Dict[str, Any] = {
         "model": cfg.model,
@@ -115,24 +115,24 @@ def build_request_payload(
 
 
 def parse_decision(text: str) -> Dict[str, Any]:
-    """Extrae y valida la decision JSON de la respuesta del modelo."""
+    """Extract and validate the JSON decision from the model response."""
     if not text or not text.strip():
-        raise ValueError("respuesta vacia del modelo")
+        raise ValueError("empty model response")
     cleaned = text.strip()
     cleaned = re.sub(r"^```(?:json)?|```$", "", cleaned, flags=re.MULTILINE).strip()
     match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
     if match is None:
-        raise ValueError(f"no se encontro JSON en la respuesta: {text[:200]!r}")
+        raise ValueError(f"no JSON object found in the response: {text[:200]!r}")
     decision = json.loads(match.group(0))
     for key in ("diagnosis", "justification", "action"):
         if key not in decision:
-            raise ValueError(f"falta el campo {key!r} en la decision")
+            raise ValueError(f"missing field {key!r} in the decision")
     action = decision["action"]
     for key in ("eta_scale", "noise_sigma", "restart"):
         if key not in action:
-            raise ValueError(f"falta el campo {key!r} en action")
+            raise ValueError(f"missing field {key!r} in action")
     if decision["diagnosis"] not in REGIMES:
-        raise ValueError(f"diagnostico fuera del conjunto permitido: {decision['diagnosis']!r}")
+        raise ValueError(f"diagnosis outside the allowed set: {decision['diagnosis']!r}")
     decision["action"]["eta_scale"] = float(action["eta_scale"])
     decision["action"]["noise_sigma"] = float(action["noise_sigma"])
     decision["action"]["restart"] = bool(action["restart"])
@@ -144,10 +144,11 @@ def decide(
     cfg: LLMConfig,
     session: Optional[requests.Session] = None,
 ) -> Dict[str, Any]:
-    """Consulta al LLM y devuelve decision + latencia.
+    """Query the LLM and return the decision plus its latency.
 
-    Si el servidor rechaza ``response_format`` con JSON schema, se reintenta sin
-    el. La latencia se mide siempre con ``time.perf_counter`` alrededor del POST.
+    If the server rejects ``response_format`` with a JSON schema, the call is
+    retried without it. Latency is always measured around the POST with
+    ``time.perf_counter``.
     """
     session = requests.Session() if session is None else session
     url = cfg.base_url.rstrip("/") + "/chat/completions"
@@ -176,7 +177,7 @@ def decide(
                 "usage": data.get("usage"),
                 "used_json_schema": use_schema,
             }
-        except Exception as exc:  # noqa: BLE001 - se registra y se reintenta sin schema
+        except Exception as exc:  # noqa: BLE001 - recorded and retried without schema
             attempts.append(
                 {
                     "error": repr(exc),

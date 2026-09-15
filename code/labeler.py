@@ -1,13 +1,13 @@
-"""Etiquetado contrafactual de la mejor intervencion (bandit).
+"""Counterfactual labeling of the best intervention (bandit formulation).
 
-Para un estado congelado (theta, semilla del run) se prueban todos los
-candidatos de intervencion y se mide la energia final tras ``lookahead`` pasos
-de SPSA con exactamente las mismas perturbaciones Rademacher. La etiqueta es el
-candidato con menor gap respecto al minimo exacto y la recompensa es la mejora
-sobre el no-op (eta_scale=1, sin ruido, sin reinicio).
+For a frozen state (angles plus run seed) every candidate intervention is rolled
+out and the final energy is measured after ``lookahead`` SPSA steps under the
+identical Rademacher perturbation stream. The label is the candidate with the
+smallest gap to the exact minimum, and the reward is its improvement over the
+no-op action (eta_scale=1, no noise, no restart).
 
-Este etiquetado es el que convierte el problema en aprendizaje supervisado o por
-refuerzo con recompensa fisica, sin depender de la opinion del LLM.
+This labeling turns the problem into supervised or reinforcement learning with a
+physical reward, without relying on the LLM's opinion.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ ArrayLike = Union[np.ndarray, Sequence[float]]
 
 @dataclass(frozen=True)
 class Intervention:
-    """Accion macroscopica del bucle lento."""
+    """One macroscopic slow-loop action."""
 
     eta_scale: float = 1.0
     noise_sigma: float = 0.0
@@ -47,7 +47,7 @@ NO_OP = Intervention()
 
 
 def default_candidates() -> List[Intervention]:
-    """Rejilla de candidatos: tasa de aprendizaje, perturbacion termica y reinicio."""
+    """Candidate grid: learning-rate scaling, thermal perturbation and restart."""
     return [
         NO_OP,
         Intervention(eta_scale=0.5),
@@ -69,7 +69,7 @@ def evaluate_candidate(
     seed: int,
     init_scale: float = 0.5,
 ) -> Dict[str, object]:
-    """Ejecuta el contrafactual de una accion desde el estado congelado."""
+    """Roll out one counterfactual from the frozen state."""
     rng = np.random.default_rng(seed)
     theta0 = apply_intervention(
         theta,
@@ -106,18 +106,18 @@ def label_state(
     candidates: Optional[Sequence[Intervention]] = None,
     init_scale: float = 0.5,
 ) -> Dict[str, object]:
-    """Etiqueta el estado con la mejor intervencion contrafactual.
+    """Label the state with the best counterfactual intervention.
 
-    Devuelve ``best_action``, el gap de cada candidato, el gap del no-op y la
-    mejora (gap_noop - gap_best). Una mejora <= 0 significa que ninguna
-    intervencion bate a seguir con SPSA tal cual.
+    Returns ``best_action``, the gap of every candidate, the no-op gap and the
+    improvement (gap_noop - gap_best). An improvement <= 0 means that no
+    intervention beats plain SPSA from that state.
     """
     candidates = default_candidates() if candidates is None else list(candidates)
     results = [
         evaluate_candidate(energy_fn, theta, cfg, action, e_min, lookahead, seed, init_scale)
         for action in candidates
     ]
-    best = min(results, key=lambda r: r["gap"])
+    best = min(results, key=lambda r: float(r["gap"]))
     baseline = next((r for r in results if r["action_name"] == NO_OP.name), results[0])
     improvement = float(baseline["gap"]) - float(best["gap"])
     return {

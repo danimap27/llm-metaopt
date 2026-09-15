@@ -1,4 +1,4 @@
-# Configuracion del barrido de generacion de datos (Bloque 1).
+# Sweep configuration for dataset generation (Block 1).
 
 ansatz:
   n_layers: 2
@@ -12,13 +12,13 @@ spsa:
   A: 10.0
 
 windows:
-  n_window: 10        # N_w: pasos entre llamadas al bucle lento
-  lookahead: 20       # pasos de SPSA por candidato en el etiquetado contrafactual
+  n_window: 10        # N_w: fast-loop steps between slow-loop calls
+  lookahead: 20       # SPSA steps per candidate in the counterfactual labeling
   max_labels_per_run: 4
 
 regimes:
-  tol_ok: 0.05
-  eps_bp: 0.001
+  tol_ok: 0.05        # |E - E_min| below this counts as converged
+  eps_bp: 0.001       # directional-gradient variance below this counts as barren plateau
   min_improvement: 0.001
   eps_grad_local: 0.005
   n_directions: 6

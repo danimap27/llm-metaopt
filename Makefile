@@ -1,22 +1,28 @@
 PY := .venv/bin/python
 
-.PHONY: help install test sweep lint clean
+.PHONY: help install test sweep experiment aggregate lint clean
 
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-install: ## Crea el venv e instala dependencias
+install: ## Create the venv and install dependencies
 	uv venv .venv --python 3.12
 	uv pip install --python $(PY) -r requirements.txt
 
-test: ## Ejecuta los tests rapidos
+test: ## Run the fast test suite
 	$(PY) -m pytest tests/ -q
 
-sweep: ## Barrido local pequeno (config por defecto)
+sweep: ## Small local dataset generation (default config)
 	$(PY) -m code.sweep --config configs/default.yaml --limit 4 --out data/sweep_smoke.jsonl
 
-lint: ## Comprobacion de sintaxis de todo el paquete
+experiment: ## Closed-loop SPSA vs SPSA+LLM on the default config
+	$(PY) -m code.experiment --config configs/default.yaml --out results/experiment.jsonl
+
+aggregate: ## Build the paper tables from results
+	$(PY) -m code.aggregate --results results/experiment.jsonl --out results/tables
+
+lint: ## Byte-compile the package and tests
 	$(PY) -m compileall -q code tests
 
-clean: ## Limpia caches
+clean: ## Remove caches
 	rm -rf .pytest_cache __pycache__ code/__pycache__ tests/__pycache__
