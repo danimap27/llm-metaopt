@@ -26,6 +26,7 @@ DECISION_SCHEMA: Dict[str, Any] = {
         "properties": {
             "diagnosis": {"type": "string", "enum": list(REGIMES)},
             "justification": {"type": "string", "maxLength": 600},
+            "expected_effect": {"type": "number", "minimum": -5.0, "maximum": 5.0},
             "action": {
                 "type": "object",
                 "properties": {
@@ -37,7 +38,7 @@ DECISION_SCHEMA: Dict[str, Any] = {
                 "additionalProperties": False,
             },
         },
-        "required": ["diagnosis", "justification", "action"],
+        "required": ["diagnosis", "justification", "action", "expected_effect"],
         "additionalProperties": False,
     },
 }
@@ -63,6 +64,7 @@ Interventions (choose one action):
 - eta_scale: multiplier applied to the SPSA step size (0.1 to 10).
 - noise_sigma: standard deviation in radians of a Gaussian perturbation added to all angles (0 to 0.5); use it to break symmetries.
 - restart: full re-initialization of the angles.
+- expected_effect: the gap reduction you expect from your action over the next window, in energy units (negative if you expect a worsening).
 
 Rules: answer with JSON only, follow the schema, keep justification under two sentences and ground it in the numbers you were given. Prefer the least invasive action that can restore progress."""
 
@@ -124,7 +126,7 @@ def parse_decision(text: str) -> Dict[str, Any]:
     if match is None:
         raise ValueError(f"no JSON object found in the response: {text[:200]!r}")
     decision = json.loads(match.group(0))
-    for key in ("diagnosis", "justification", "action"):
+    for key in ("diagnosis", "justification", "action", "expected_effect"):
         if key not in decision:
             raise ValueError(f"missing field {key!r} in the decision")
     action = decision["action"]
@@ -136,6 +138,7 @@ def parse_decision(text: str) -> Dict[str, Any]:
     decision["action"]["eta_scale"] = float(action["eta_scale"])
     decision["action"]["noise_sigma"] = float(action["noise_sigma"])
     decision["action"]["restart"] = bool(action["restart"])
+    decision["expected_effect"] = float(decision["expected_effect"])
     return decision
 
 

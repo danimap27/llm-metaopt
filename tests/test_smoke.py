@@ -212,11 +212,22 @@ def test_llm_payload_and_decision_parsing():
 
     raw = (
         '```json\n{"diagnosis": "BARREN_PLATEAU", "justification": "gradients vanish", '
+        '"expected_effect": 0.05, '
         '"action": {"eta_scale": 2.0, "noise_sigma": 0.15, "restart": false}}\n```'
     )
     decision = parse_decision(raw)
     assert decision["diagnosis"] == "BARREN_PLATEAU"
     assert decision["action"]["noise_sigma"] == pytest.approx(0.15)
+    assert decision["expected_effect"] == pytest.approx(0.05)
+
+
+def test_llm_parse_decision_requires_the_expected_effect():
+    raw = (
+        '{"diagnosis": "MINIMO_LOCAL", "justification": "flat", '
+        '"action": {"eta_scale": 1.0, "noise_sigma": 0.0, "restart": false}}'
+    )
+    with pytest.raises(ValueError):
+        parse_decision(raw)
 
 
 def test_llm_parse_decision_handles_garbage():
