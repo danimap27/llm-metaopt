@@ -355,5 +355,237 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# Drifting-objective block (E2)
+# --------------------------------------------------------------------------- #
+
+DRIFT_CONDITIONS: Tuple[str, ...] = ("drift_spsa", "drift_detector", "drift_random", "drift_llm")
+
+
+def _trapezoid(values: np.ndarray) -> float:
+    """Area under a sampled curve, numpy 1.x and 2.x compatible."""
+    function = getattr(np, "trapezoid", None)
+    if function is None:  # numpy < 2.0
+        function = np.trapz  # type: ignore[attr-defined]
+    return float(function(values))
+
+
+def _drift_response_metrics(
+    events: Sequence[Dict[str, Any]],
+    gaps: Sequence[float],
+    boundaries: Sequence[int],
+    threshold: float,
+) -> Dict[str, Any]:
+    """Mean lag, per boundary, to the first real intervention and to recovery.
+
+    Detection latency is counted from the true drift step to the first slow-loop
+    call that actually changed the trajectory. Recovery is counted from the drift
+    step to the first fast-loop step inside the convergence threshold of the new
+    objective. Boundaries never reached by either event are skipped, so the means
+    are honest about what happened rather than padded with the horizon.
+    """
+    detection_lags: List[int] = []
+    recovery_lags: List[int] = []
+    for boundary in sorted(int(value) for value in boundaries):
+        action_step = next(
+            (
+                int(event["step"])
+                for event in events
+                if int(event["step"]) >= boundary and bool(event.get("changed", False))
+            ),
+            None,
+        )
+        if action_step is not None:
+            detection_lags.append(action_step - boundary)
+        recovery_step = next(
+            (index for index in range(boundary, len(gaps)) if abs(float(gaps[index])) <= threshold),
+            None,
+        )
+        if recovery_step is not None:
+            recovery_lags.append(recovery_step - boundary)
+    return {
+        "n_boundaries": len(list(boundaries)),
+        "n_detected": len(detection_lags),
+        "n_recovered": len(recovery_lags),
+        "detection_latency": float(np.mean(detection_lags)) if detection_lags else None,
+        "recovery_steps": float(np.mean(recovery_lags)) if recovery_lags else None,
+    }
+
+
+def run_drift_loop(
+    condition: str,
+    objective: Any,
+    theta0: np.ndarray,
+    spsa_cfg: SPSAConfig,
+    *,
+    n_window: int = 10,
+    threshold: float = 0.05,
+    seed: int = 0,
+    detector_threshold: float = 0.5,
+    safeguard_epsilon: float = 0.05,
+    llm_cfg: Optional[LLMConfig] = None,
+    cache: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Track a piecewise-stationary objective and record the drift response.
+
+    The safeguard closes every window by comparing the gap with the gap at the
+    moment of the intervention. A degradation larger than ``safeguard_epsilon``
+    reverts the angles, which bounds the total damage by the number of
+    interventions times epsilon.
+    """
+    from .detectors import PageHinkley, WindowedMeanShift
+    from .llm_client import decide_cached
+
+    if condition not in DRIFT_CONDITIONS:
+        raise ValueError(f"Unknown drift condition: {condition!r}. Options: {DRIFT_CONDITIONS}")
+
+    candidates = list(default_candidates())
+    fast_rng = np.random.default_rng(seed)
+    ctrl_rng = np.random.default_rng(seed + 1_000_003)
+    detector = PageHinkley(delta=0.01, threshold=detector_threshold) if condition == "drift_detector" else None
+    mean_shift = (
+        WindowedMeanShift(window=max(5, n_window), threshold=3.0, min_samples=max(5, n_window))
+        if condition == "drift_detector"
+        else None
+    )
+
+    theta = np.asarray(theta0, dtype=float).copy()
+    history: List[Dict[str, Any]] = []
+    events: List[Dict[str, Any]] = []
+    boundaries = set(int(value) for value in objective.spec.boundaries())
+    total_steps = int(objective.spec.total_steps)
+    eta_scale = 1.0
+    llm_calls = 0
+    llm_latency = 0.0
+    llm_failures = 0
+    pending: Optional[int] = None
+
+    def _close_window(index: Optional[int]) -> None:
+        """Apply the safeguard to the window that just finished."""
+        nonlocal theta
+        if index is None:
+            return
+        event = events[index]
+        if history and (float(history[-1]["gap"]) - float(event["gap_before"])) > safeguard_epsilon:
+            theta = np.asarray(event["theta_snapshot"], dtype=float)
+            event["reverted"] = True
+        event.pop("theta_snapshot", None)
+
+    for step in range(total_steps):
+        if step > 0 and step % n_window == 0:
+            _close_window(pending)
+            pending = None
+            window = build_window(history, len(history) - 1, n_window, eta_scale=eta_scale, theta=theta)
+            window["step"] = step
+            info: Dict[str, Any] = {"segment": objective.segment_of(step), "after_boundary": step in boundaries}
+            action = NO_OP
+            if condition == "drift_detector":
+                alarm = bool(detector and detector.update(float(history[-1]["energy"]))) or bool(
+                    mean_shift and mean_shift.update(float(history[-1]["energy"]))
+                )
+                if alarm:
+                    action = Intervention(restart=True)
+                    info["alarm"] = True
+            elif condition == "drift_random":
+                action = random_decision(ctrl_rng, candidates)
+            elif condition == "drift_llm" and llm_cfg is not None:
+                response = decide_cached(window, llm_cfg, cache) if cache is not None else llm_decide(window, llm_cfg)
+                llm_calls += 1
+                if response.get("ok"):
+                    llm_latency += float(response["latency_s"])
+                    payload = response["decision"]
+                    action = Intervention(
+                        eta_scale=float(payload["action"]["eta_scale"]),
+                        noise_sigma=float(payload["action"]["noise_sigma"]),
+                        restart=bool(payload["action"]["restart"]),
+                    )
+                    info.update(
+                        {
+                            "diagnosis": payload["diagnosis"],
+                            "justification": payload["justification"],
+                            "expected_effect": payload["expected_effect"],
+                            "latency_s": response["latency_s"],
+                            "cached": bool(response.get("cached", False)),
+                        }
+                    )
+                else:
+                    llm_failures += 1
+                    info["llm_failed"] = True
+
+            changed = action != NO_OP
+            theta_snapshot = theta.copy()
+            if changed:
+                theta = apply_intervention(
+                    theta,
+                    eta_scale=1.0,
+                    noise_sigma=float(action.noise_sigma),
+                    restart=bool(action.restart),
+                    rng=ctrl_rng,
+                    init_scale=objective.spec.init_scale,
+                )
+            eta_scale = float(action.eta_scale) if action.eta_scale > 0 else 1.0
+            events.append(
+                {
+                    "step": step,
+                    "condition": condition,
+                    "action": action.to_dict(),
+                    "changed": changed,
+                    "gap_before": float(history[-1]["gap"]) if history else 0.0,
+                    "theta_snapshot": theta_snapshot.tolist(),
+                    **info,
+                }
+            )
+            pending = len(events) - 1
+
+        theta, record = spsa_step(
+            lambda th, s=step: objective.energy(s, th), theta, spsa_cfg, step, fast_rng, eta_scale
+        )
+        energy = objective.energy(step, theta)
+        history.append(
+            {
+                "step": step,
+                "energy": energy,
+                "gap": energy - objective.e_min(step),
+                "segment": objective.segment_of(step),
+                "grad_norm": record["grad_norm"],
+                "a_k": record["a_k"],
+                "c_k": record["c_k"],
+                "theta": theta.tolist(),
+            }
+        )
+
+    _close_window(pending)
+    gaps = [float(record["gap"]) for record in history]
+    metrics = _drift_response_metrics(events, gaps, sorted(boundaries), threshold)
+    return {
+        "condition": condition,
+        "final_gap": abs(gaps[-1]),
+        "final_gap_by_segment": [
+            abs(float(gaps[end - 1])) for end in _segment_ends(objective)
+        ],
+        "area_under_gap": _trapezoid(np.abs(np.asarray(gaps))),
+        "n_interventions": len(events),
+        "n_changes": sum(1 for event in events if event.get("changed")),
+        "n_reverted": sum(1 for event in events if event.get("reverted")),
+        "n_llm_calls": llm_calls,
+        "llm_latency_total_s": llm_latency,
+        "llm_failures": llm_failures,
+        "energy_curve": [float(record["energy"]) for record in history],
+        "gap_curve": gaps,
+        "events": events,
+        **metrics,
+    }
+
+
+def _segment_ends(objective: Any) -> List[int]:
+    """Last step index of each segment."""
+    ends: List[int] = []
+    running = 0
+    for segment in objective.spec.segments:
+        running += int(segment["steps"])
+        ends.append(running)
+    return ends
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
