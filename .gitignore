@@ -1,0 +1,22 @@
+# Entorno
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Datos y resultados (pesados, no versionar)
+data/
+results/
+models/
+*.jsonl
+*.npz
+*.pt
+
+# Secretos
+.env
+.env.*
+
+# Sistema
+.DS_Store
+*.log
