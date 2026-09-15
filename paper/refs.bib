@@ -1,17 +1,233 @@
 % Bibliography for the LLM-MetaOpt paper.
 %
-% RULES
-% 1. Only verified entries are allowed. Each entry must resolve to an arXiv
-%    identifier, a DOI or a publisher page that can be opened.
-% 2. Every entry carries a comment with the URL used to verify it.
-% 3. If an entry cannot be verified it does not belong here, it belongs in the
-%    project notes as a TODO.
+% Every entry below was resolved against a public record and carries the source
+% URL in a % VERIFIED comment. Regenerate or extend with:
+%   python scripts/verify_references.py --ids ... --dois ... --out paper/refs.bib
+% Never add an entry that the script cannot resolve.
 
-% TODO: populate from the verified literature review once it is merged.
-% Slots to fill:
-%   - variational quantum algorithms and barren plateaus
-%   - classical optimizers for VQAs and the parameter-shift rule
-%   - language models as optimizers or black-box search controllers
-%   - language models applied to quantum computing tasks
-%   - reinforcement learning and meta-learning for quantum control
-%   - explainability for quantum machine learning
+@misc{peruzzo2013variational,
+  author       = {Alberto Peruzzo and Jarrod McClean and Peter Shadbolt and Man-Hong Yung and Xiao-Qi Zhou and Peter J. Love and Alán Aspuru-Guzik and Jeremy L. O'Brien},
+  title        = {A variational eigenvalue solver on a quantum processor},
+  year         = {2013},
+  eprint       = {1304.3061},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1038/ncomms5213},
+  note         = {Published as: Nature Communications, 5:4213, (2014)},
+  % VERIFIED: http://arxiv.org/abs/1304.3061v1
+}
+
+@misc{mcclean2018barren,
+  author       = {Jarrod R. McClean and Sergio Boixo and Vadim N. Smelyanskiy and Ryan Babbush and Hartmut Neven},
+  title        = {Barren plateaus in quantum neural network training landscapes},
+  year         = {2018},
+  eprint       = {1803.11173},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1038/s41467-018-07090-4},
+  note         = {Published as: Nature Communications, Volume 9, Article Number: 4812 (2018)},
+  % VERIFIED: http://arxiv.org/abs/1803.11173v1
+}
+
+@misc{cerezo2020variational,
+  author       = {M. Cerezo and Andrew Arrasmith and Ryan Babbush and Simon C. Benjamin and Suguru Endo and Keisuke Fujii and Jarrod R. McClean and Kosuke Mitarai and Xiao Yuan and Lukasz Cincio and Patrick J. Coles},
+  title        = {Variational Quantum Algorithms},
+  year         = {2020},
+  eprint       = {2012.09265},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1038/s42254-021-00348-9},
+  note         = {Published as: Nature Reviews Physics 3, 625-644 (2021)},
+  % VERIFIED: http://arxiv.org/abs/2012.09265v2
+}
+
+@misc{cerezo2020cost,
+  author       = {M. Cerezo and Akira Sone and Tyler Volkoff and Lukasz Cincio and Patrick J. Coles},
+  title        = {Cost Function Dependent Barren Plateaus in Shallow Parametrized Quantum Circuits},
+  year         = {2020},
+  eprint       = {2001.00550},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1038/s41467-021-21728-w},
+  note         = {Published as: Nature Communications 12, 1791 (2021)},
+  % VERIFIED: http://arxiv.org/abs/2001.00550v3
+}
+
+@misc{mitarai2018quantum,
+  author       = {Kosuke Mitarai and Makoto Negoro and Masahiro Kitagawa and Keisuke Fujii},
+  title        = {Quantum Circuit Learning},
+  year         = {2018},
+  eprint       = {1803.00745},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1103/PhysRevA.98.032309},
+  note         = {Published as: Phys. Rev. A 98, 032309 (2018)},
+  % VERIFIED: http://arxiv.org/abs/1803.00745v3
+}
+
+@misc{stokes2019quantum,
+  author       = {James Stokes and Josh Izaac and Nathan Killoran and Giuseppe Carleo},
+  title        = {Quantum Natural Gradient},
+  year         = {2019},
+  eprint       = {1909.02108},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.22331/q-2020-05-25-269},
+  note         = {Published as: Quantum 4, 269 (2020)},
+  % VERIFIED: http://arxiv.org/abs/1909.02108v3
+}
+
+@misc{larocca2024barren,
+  author       = {Martin Larocca and Supanut Thanasilp and Samson Wang and Kunal Sharma and Jacob Biamonte and Patrick J. Coles and Lukasz Cincio and Jarrod R. McClean and Zoë Holmes and M. Cerezo},
+  title        = {Barren Plateaus in Variational Quantum Computing},
+  year         = {2024},
+  eprint       = {2405.00781},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1038/s42254-025-00813-9},
+  note         = {Published as: Nature Reviews Physics 7, 174-189 (2025)},
+  % VERIFIED: http://arxiv.org/abs/2405.00781v2
+}
+
+@misc{gilfuster2024opportunities,
+  author       = {Elies Gil-Fuster and Jonas R. Naujoks and Grégoire Montavon and Thomas Wiegand and Wojciech Samek and Jens Eisert},
+  title        = {Opportunities and limitations of explaining quantum machine learning},
+  year         = {2024},
+  eprint       = {2412.14753},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2412.14753v1
+}
+
+@misc{yang2023large,
+  author       = {Chengrun Yang and Xuezhi Wang and Yifeng Lu and Hanxiao Liu and Quoc V. Le and Denny Zhou and Xinyun Chen},
+  title        = {Large Language Models as Optimizers},
+  year         = {2023},
+  eprint       = {2309.03409},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LG},
+  % VERIFIED: http://arxiv.org/abs/2309.03409v3
+}
+
+@misc{niu2018universal,
+  author       = {Murphy Yuezhen Niu and Sergio Boixo and Vadim Smelyanskiy and Hartmut Neven},
+  title        = {Universal Quantum Control through Deep Reinforcement Learning},
+  year         = {2018},
+  eprint       = {1803.01857},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/1803.01857v2
+}
+
+@misc{finn2017model,
+  author       = {Chelsea Finn and Pieter Abbeel and Sergey Levine},
+  title        = {Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks},
+  year         = {2017},
+  eprint       = {1703.03400},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LG},
+  % VERIFIED: http://arxiv.org/abs/1703.03400v3
+}
+
+@misc{zhuang2025large,
+  author       = {Jun Zhuang and Chaowen Guan},
+  title        = {Large Language Models Can Help Mitigate Barren Plateaus in Quantum Neural Networks},
+  year         = {2025},
+  eprint       = {2502.13166},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2502.13166v3
+}
+
+@misc{peng2025breaking,
+  author       = {Yifeng Peng and Xinyi Li and Zhemin Zhang and Samuel Yen-Chi Chen and Zhiding Liang and Ying Wang},
+  title        = {Breaking Through Barren Plateaus: Reinforcement Learning Initializations for Deep Variational Quantum Circuits},
+  year         = {2025},
+  eprint       = {2508.18514},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LG},
+  % VERIFIED: http://arxiv.org/abs/2508.18514v1
+}
+
+@misc{sharma2026autoqresearch,
+  author       = {Monit Sharma and Hoong Chuin Lau},
+  title        = {AutoQResearch: LLM-Guided Closed-Loop Policy Search for Adaptive Variational Quantum Optimization},
+  year         = {2026},
+  eprint       = {2604.24283},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2604.24283v2
+}
+
+@misc{sakka2026system,
+  author       = {Kenya Sakka and Wataru Mizukami and Kosuke Mitarai},
+  title        = {An LLM System for Autonomous Variational Quantum Circuit Design},
+  year         = {2026},
+  eprint       = {2606.13380},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2606.13380v1
+}
+
+@misc{jiang2025qseer,
+  author       = {Lei Jiang and Chi Zhang and Fan Chen},
+  title        = {QSeer: A Quantum-Inspired Graph Neural Network for Parameter Initialization in Quantum Approximate Optimization Algorithm Circuits},
+  year         = {2025},
+  eprint       = {2505.06810},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.ET},
+  % VERIFIED: http://arxiv.org/abs/2505.06810v1
+}
+
+@misc{tyagin2025qaoa,
+  author       = {Ilya Tyagin and Marwa H. Farag and Kyle Sherbert and Karunya Shirali and Yuri Alexeev and Ilya Safro},
+  title        = {QAOA-GPT: Efficient Generation of Adaptive and Regular Quantum Approximate Optimization Algorithm Circuits},
+  year         = {2025},
+  eprint       = {2504.16350},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2504.16350v1
+}
+
+@misc{syah2026guided,
+  author       = {Riza Alaudin Syah and Irwan Alnarus Kautsar and Haza Nuzly Bin Abdull Hamed},
+  title        = {LLM-Guided Initialization for Accelerated Hybrid Quantum-Classical Medical Image Classification},
+  year         = {2026},
+  eprint       = {2607.27262},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.1109/IAICT71158.2026.11620917},
+  % VERIFIED: http://arxiv.org/abs/2607.27262v1
+}
+
+@misc{nguyen2026bridg,
+  author       = {Ngoc Nhi Nguyen and Thai T Vu and John Le and Hoa Khanh Dam and Dung Hoang Duong and Dinh Thai Hoang},
+  title        = {BRIDG-Q: Barren-Plateau-Resilient Initialisation with Data-Aware LLM-Generated Quantum Circuits},
+  year         = {2026},
+  eprint       = {2603.23979},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.ET},
+  % VERIFIED: http://arxiv.org/abs/2603.23979v1
+}
+
+@misc{chen2026driven,
+  author       = {Yu-Qin Chen and Shi-Xin Zhang},
+  title        = {LLM-Driven Cross-Paradigm Design for Quantum Optimal Control},
+  year         = {2026},
+  eprint       = {2607.17498},
+  archivePrefix = {arXiv},
+  primaryClass = {quant-ph},
+  % VERIFIED: http://arxiv.org/abs/2607.17498v1
+}
+
+@article{romeraparedes2024mathematical,
+  author    = { Bernardino Romera-Paredes and Mohammadamin Barekatain and Alexander Novikov and Matej Balog and M. Pawan Kumar and Emilien Dupont and Francisco J. R. Ruiz and Jordan S. Ellenberg and Pengming Wang and Omar Fawzi and Pushmeet Kohli and Alhussein Fawzi },
+  title     = {Mathematical discoveries from program search with large language models},
+  journal   = {Nature},
+  year      = {2024},
+  volume    = {625},
+  issue     = {7995},
+  page      = {468-475},
+  doi       = {10.1038/s41586-023-06924-6},
+  % VERIFIED: https://api.crossref.org/works/10.1038/s41586-023-06924-6
+}
