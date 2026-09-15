@@ -27,5 +27,14 @@ sweep:
   hamiltonians: [heisenberg, tfim, xy]
   n_qubits: [2, 3]
   noise_p: [0.0, 0.02, 0.05]
-  seeds: [0, 1, 2]
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   init_scale: 0.5
+
+# Drifting-objective block (E2): the objective changes mid-run with no warning.
+drift:
+  segments: 3
+  steps_per_segment: 40
+  hamiltonians: [heisenberg, tfim, xy]
+  noise_p: [0.0, 0.02]
+  detector_threshold: 0.5    # Page-Hinkley / mean-shift alarm level in energy units
+  safeguard_epsilon: 0.05    # revert an intervention that degrades the gap by more
