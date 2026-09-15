@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the corresponding paper."
+title: "LLM-MetaOpt: Language Models as Heuristic Meta-Optimizers and Intelligent Initializers for Variational Quantum Algorithms"
+authors:
+  - family-names: "Martín Pérez"
+    given-names: "Daniel"
+    affiliation: "Universidad Pablo de Olavide, Seville, Spain"
+    email: "danimp2002@gmail.com"
+version: 0.1.0
+date-released: "2026-09-15"
+license: MIT
+repository-code: "https://github.com/danimap27/llm-metaopt"
+keywords:
+  - variational quantum algorithms
+  - VQE
+  - large language models
+  - meta-optimization
+  - barren plateaus
+  - explainability
+  - Qiskit

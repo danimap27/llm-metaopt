@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Unit and smoke tests
+        run: python -m pytest tests/ -q
+      - name: Closed-loop smoke run (mock LLM, no endpoint needed)
+        run: python -m code.experiment --config configs/default.yaml --mock-llm --limit 6 --out results/ci.jsonl
+      - name: Aggregate smoke run
+        run: python -m code.aggregate --results results/ci.jsonl --out results/tables
