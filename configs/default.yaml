@@ -1,0 +1,31 @@
+# Configuracion del barrido de generacion de datos (Bloque 1).
+
+ansatz:
+  n_layers: 2
+
+spsa:
+  steps: 120
+  a: 0.25
+  c: 0.1
+  alpha: 0.602
+  gamma: 0.101
+  A: 10.0
+
+windows:
+  n_window: 10        # N_w: pasos entre llamadas al bucle lento
+  lookahead: 20       # pasos de SPSA por candidato en el etiquetado contrafactual
+  max_labels_per_run: 4
+
+regimes:
+  tol_ok: 0.05
+  eps_bp: 0.001
+  min_improvement: 0.001
+  eps_grad_local: 0.005
+  n_directions: 6
+
+sweep:
+  hamiltonians: [heisenberg, tfim, xy]
+  n_qubits: [2, 3]
+  noise_p: [0.0, 0.02, 0.05]
+  seeds: [0, 1, 2]
+  init_scale: 0.5
