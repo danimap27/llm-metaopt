@@ -86,3 +86,34 @@ llm:
 The homelab (16 GB) can serve the 4B model only. If a run is repeated there, say
 so in the manuscript and report the endpoint of each block, because the latency
 distribution differs between machines.
+
+## 7. Serving configurations and the latency claim
+
+The cost model of the paper turns on the per-call latency, so the endpoint is part
+of the experimental design and the results report which configuration produced
+them. Three configurations are worth measuring, and the break-even surface of
+`code/theory.py` is plotted over all three:
+
+| Configuration | Hardware | Model that fits comfortably | Expected decision latency |
+|---|---|---|---|
+| CPU only | homelab (i5-8500, 16 GB) | 4B at Q4 | tens of seconds, unusable for long runs |
+| Single GPU | MSI Prestige (Radeon 890M, 32 GB unified) | 4B to 9B at Q4 | a few seconds |
+| Dual GPU node | 2 x RTX 3090 (48 GB VRAM) | 4B to 9B in half precision, 27B to 34B at 4 bits, 70B at 4 bits with tensor parallelism | under a second for the small models, a few seconds for the large ones |
+
+Practical notes for the dual-GPU node:
+
+- Serve with `vllm serve <model> --tensor-parallel-size 2 --max-model-len 8192` for
+  the large models, which also batches concurrent requests and exposes an
+  OpenAI-compatible API that the client already speaks (`api_style: openai`).
+- Or use `llama-server` with `--tensor-split 1,1 --ngl 99` for the quantized
+  single-file models.
+- A second card is what makes the E4 ablation affordable: several model families
+  can be served side by side, and the trained specialist of T23 can be fine-tuned
+  locally with QLoRA instead of waiting for an HPC allocation.
+- Report the serving configuration, the model tag, the quantization, the sampling
+  parameters and the measured distribution for every block of experiments.
+
+The honest framing in the manuscript is that supervision pays when the per-call
+latency is small relative to the gap it recovers, which is exactly what the
+break-even condition states. A dual-GPU node makes the supervised loop practical,
+a CPU-only host makes it impractical, and both are reported as measured.
