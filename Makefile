@@ -1,6 +1,6 @@
 PY := .venv/bin/python
 
-.PHONY: help install test sweep experiment aggregate lint clean
+.PHONY: help install test sweep experiment drift aggregate figures lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -20,6 +20,12 @@ experiment: ## Closed-loop SPSA vs SPSA+LLM on the default config
 
 aggregate: ## Build the paper tables from results
 	$(PY) -m code.aggregate --results results/experiment.jsonl --out results/tables
+
+drift: ## Drifting-objective block (offline smoke; drop --mock-llm for the real endpoint)
+	$(PY) -m code.run_drift --config configs/default.yaml --seeds 3 --mock-llm --out results/drift.jsonl
+
+figures: ## Build the manuscript figures from results
+	$(PY) -m code.figures --results results/drift.jsonl --out results/figures
 
 lint: ## Byte-compile the package and tests
 	$(PY) -m compileall -q code tests
