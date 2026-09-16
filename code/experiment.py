@@ -177,6 +177,7 @@ def run_closed_loop(
                         info = {
                             "diagnosis": payload["diagnosis"],
                             "justification": payload["justification"],
+                            "expected_effect": payload["expected_effect"],
                             "latency_s": response["latency_s"],
                         }
                     else:
@@ -448,6 +449,8 @@ def run_drift_loop(
         if condition == "drift_detector"
         else None
     )
+    detector_cooldown = max(5, n_window)
+    last_detector_restart = -10**9
 
     theta = np.asarray(theta0, dtype=float).copy()
     history: List[Dict[str, Any]] = []
@@ -480,12 +483,9 @@ def run_drift_loop(
             info: Dict[str, Any] = {"segment": objective.segment_of(step), "after_boundary": step in boundaries}
             action = NO_OP
             if condition == "drift_detector":
-                alarm = bool(detector and detector.update(float(history[-1]["energy"]))) or bool(
-                    mean_shift and mean_shift.update(float(history[-1]["energy"]))
-                )
-                if alarm:
-                    action = Intervention(restart=True)
-                    info["alarm"] = True
+                # The classical controller acts on per-step alarms below, so this
+                # window event is bookkeeping only and never enters the safeguard.
+                info["bookkeeping"] = True
             elif condition == "drift_random":
                 action = random_decision(ctrl_rng, candidates)
             elif condition == "drift_llm" and llm_cfg is not None:
@@ -535,7 +535,7 @@ def run_drift_loop(
                     **info,
                 }
             )
-            pending = len(events) - 1
+            pending = None if condition == "drift_detector" else len(events) - 1
 
         theta, record = spsa_step(
             lambda th, s=step: objective.energy(s, th), theta, spsa_cfg, step, fast_rng, eta_scale
@@ -553,6 +553,34 @@ def run_drift_loop(
                 "theta": theta.tolist(),
             }
         )
+
+        if condition == "drift_detector":
+            energy_now = float(history[-1]["energy"])
+            alarm = bool(detector and detector.update(energy_now)) or bool(
+                mean_shift and mean_shift.update(energy_now)
+            )
+            if alarm and step - last_detector_restart >= detector_cooldown:
+                theta = apply_intervention(
+                    theta,
+                    eta_scale=1.0,
+                    noise_sigma=0.0,
+                    restart=True,
+                    rng=ctrl_rng,
+                    init_scale=objective.spec.init_scale,
+                )
+                last_detector_restart = step
+                events.append(
+                    {
+                        "step": step,
+                        "condition": condition,
+                        "action": Intervention(restart=True).to_dict(),
+                        "changed": True,
+                        "alarm": True,
+                        "gap_before": energy_now - objective.e_min(step),
+                        "segment": objective.segment_of(step),
+                        "after_boundary": step in boundaries,
+                    }
+                )
 
     _close_window(pending)
     gaps = [float(record["gap"]) for record in history]

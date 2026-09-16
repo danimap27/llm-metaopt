@@ -61,6 +61,26 @@ def test_detector_condition_restarts_after_the_boundary():
     assert result["n_changes"] >= 1
     assert result["detection_latency"] is not None
     assert any(event["action"]["restart"] for event in result["events"])
+    assert any(event.get("alarm") for event in result["events"])
+    # The safeguard belongs to the supervised controller, not to the classical baseline.
+    assert result["n_reverted"] == 0
+
+
+def test_detector_restarts_respect_the_cooldown():
+    spec = _spec()
+    result = run_drift_loop(
+        "drift_detector",
+        DriftingObjective(spec),
+        _theta0(spec),
+        SPSAConfig(seed=0),
+        n_window=4,
+        threshold=0.05,
+        seed=0,
+        detector_threshold=-1.0,  # alarms on every sample
+    )
+    alarms = [int(event["step"]) for event in result["events"] if event.get("alarm")]
+    assert len(alarms) >= 2
+    assert all(later - earlier >= 4 for earlier, later in zip(alarms, alarms[1:]))
 
 
 def test_llm_condition_survives_an_unreachable_endpoint():

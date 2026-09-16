@@ -105,7 +105,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             record = {
                 "kind": "drift_run",
-                "run_id": f"drift_{condition}_s{seed}",
+                "run_id": f"{condition}_s{seed}",
                 "seed": seed,
                 "condition": condition,
                 "meta": {
