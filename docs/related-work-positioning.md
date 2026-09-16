@@ -11,7 +11,7 @@ Related Work with an explicit statement of the difference.
 
 | Work | What it does | What it does not do |
 |---|---|---|
-| Zhuang and Guan, `zhuang2025large` (2502.13166) | Uses LLMs to mitigate barren plateaus in quantum neural networks | No continuous supervision loop over a classical optimizer, no regime diagnosis during training, no explainability protocol, no attribution controls |
+| Zhuang and Guan, `zhuang2025large` (2502.13166), code reviewed in `docs/adainit-analysis.md` | Iterative LLM search for initial parameters of QNN classifiers against barren plateaus, accepted at ACL 2026 Findings | No continuous supervision loop over a classical optimizer, no regime diagnosis during training, no explainability protocol, no attribution controls, no latency accounting |
 | Sharma et al., `sharma2026autoqresearch` (2604.24283) | LLM-guided closed-loop policy search for adaptive variational quantum optimization | Searches solver policies for combinatorial optimization, not the energy-landscape optimization of a variational algorithm, and reports no ground-truth regime labels |
 | Nguyen et al., `nguyen2026bridg` (2603.23979) | Barren-plateau-resilient initialisation with data-aware LLM-generated circuits | Initialisation only, no slow loop, no intervention space, no latency accounting |
 | Jiang et al., `jiang2025qseer` (2607.27262) | Quantum-inspired graph network for parameter initialisation in QAOA | Initialisation only, specific to QAOA, no supervision during training |
