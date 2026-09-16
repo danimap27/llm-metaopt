@@ -73,6 +73,7 @@ def lint(text: str, bib_path: Optional[pathlib.Path] = None, tex_path: Optional[
 
     in_abstract = False
     in_main_section = False
+    in_algorithm = False
     for number, raw_line in enumerate(lines, start=1):
         line = strip_comment(raw_line)
         if "\\begin{abstract}" in line:
@@ -88,6 +89,11 @@ def lint(text: str, bib_path: Optional[pathlib.Path] = None, tex_path: Optional[
             elif MAIN_SECTION_END.lower() in title.lower():
                 in_main_section = False
 
+        if line.lstrip().startswith('\\' + "begin{algorithm}"):
+            in_algorithm = True
+        if line.lstrip().startswith('\\' + "end{algorithm}"):
+            in_algorithm = False
+
         prose = strip_math(line)
         if not prose.strip():
             continue
@@ -96,9 +102,9 @@ def lint(text: str, bib_path: Optional[pathlib.Path] = None, tex_path: Optional[
             report(number, "no-semicolons", "a semicolon appears in prose")
         if "\u2014" in prose or "--" in prose:
             report(number, "no-em-dashes", "an em dash or a double hyphen appears in prose")
-        if in_main_section and "\\textbf" in prose:
+        if in_main_section and not in_algorithm and "\\textbf" in prose:
             report(number, "no-bold-in-main-sections", "bold text inside a main section")
-        if in_main_section and ("\\begin{itemize}" in prose or "\\begin{enumerate}" in prose):
+        if in_main_section and not in_algorithm and ("\\begin{itemize}" in prose or "\\begin{enumerate}" in prose):
             report(number, "no-lists-in-main-sections", "a list inside a main section")
         if in_abstract:
             for acronym in ACRONYM_PATTERN.findall(prose):
