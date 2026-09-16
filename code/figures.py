@@ -42,7 +42,11 @@ def convergence_bands(records: Sequence[Dict[str, Any]], path: Any) -> Any:
     """Median energy with an interquartile band over seeds, one line per condition."""
     figure, axes = plt.subplots(figsize=(6.0, 3.6))
     for condition in _conditions(records):
-        curves = [record["energy_curve"] for record in records if record.get("condition") == condition]
+        curves = [
+            record["energy_curve"]
+            for record in records
+            if record.get("condition") == condition and "energy_curve" in record
+        ]
         if not curves:
             continue
         stacked = _stack(curves, reference=True)
