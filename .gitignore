@@ -23,3 +23,13 @@ models/
 
 # Artefactos de agentes
 .hermes/
+
+# LaTeX (build artifacts of the manuscript)
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.log
+paper/*.out
+paper/*.pdf
