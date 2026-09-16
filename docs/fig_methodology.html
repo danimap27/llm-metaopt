@@ -1,162 +1,188 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
 <meta charset="utf-8">
-<title>LLM-MetaOpt methodology</title>
+<title>Metodologia LLM-MetaOpt</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; padding: 12px 4px; color: var(--foreground, #222); }
-  .wrap { max-width: 940px; }
+  body { margin: 0; padding: 14px 4px 10px; color: var(--foreground, #222); }
+  .wrap { max-width: 920px; }
   svg text { fill: var(--foreground, #222); font-family: inherit; }
   .muted { fill: var(--muted-foreground, #666); }
-  .stage { fill: var(--card, #fff); stroke: var(--border, #999); stroke-width: 1.4; cursor: pointer; transition: stroke .15s, stroke-width .15s; }
-  .stage:hover, .stage.active { stroke: var(--accent, #3366cc); stroke-width: 2.4; }
-  .cluster { fill: color-mix(in srgb, var(--muted-foreground, #888) 10%, transparent); stroke: var(--border, #999); stroke-width: 1.2; }
-  .edge { fill: none; stroke: var(--foreground, #444); stroke-width: 1.6; }
-  .edgeback { fill: none; stroke: var(--muted-foreground, #777); stroke-width: 1.5; stroke-dasharray: 6 4; }
-  .flow { animation: dashmove 1.1s linear infinite; }
-  @keyframes dashmove { to { stroke-dashoffset: -20; } }
-  .badge circle { fill: var(--card, #fff); stroke: var(--accent, #3366cc); stroke-width: 1.4; }
-  .badge text { fill: var(--accent, #3366cc); font-size: 11px; font-weight: 600; }
-  .elab { font-size: 10.5px; fill: var(--muted-foreground, #666); font-style: italic; }
+  .band { fill: color-mix(in srgb, var(--muted-foreground, #888) 6%, transparent); stroke: var(--border, #999); stroke-width: 1.1; }
+  .bandlab { font-size: 11px; letter-spacing: .4px; fill: var(--muted-foreground, #666); font-weight: 600; }
+  .stage { fill: var(--card, #fff); stroke: var(--border, #999); stroke-width: 1.4; }
+  .gnode { cursor: pointer; }
+  .gnode:hover .stage, .gnode.active .stage { stroke: var(--accent, #3366cc); stroke-width: 2.4; }
+  .edge { fill: none; stroke: var(--foreground, #444); stroke-width: 1.7; }
+  .edgeback { fill: none; stroke: var(--accent, #3366cc); stroke-width: 1.7; stroke-dasharray: 7 5; }
+  .flow { animation: dm 1.1s linear infinite; }
+  @keyframes dm { to { stroke-dashoffset: -24; } }
+  .elab { font-size: 10.5px; fill: var(--muted-foreground, #666); }
+  .elabA { font-size: 10.8px; fill: var(--accent, #3366cc); font-weight: 600; }
+  .badge circle { fill: var(--accent, #3366cc); stroke: none; }
+  .badge text { fill: #fff; font-size: 11px; font-weight: 700; }
+  .chip { fill: color-mix(in srgb, var(--muted-foreground, #888) 10%, transparent); stroke: var(--border, #bbb); stroke-width: 1; }
+  .chiptext { font-size: 10.6px; }
   .note { fill: color-mix(in srgb, var(--muted-foreground, #888) 7%, transparent); stroke: var(--border, #bbb); stroke-width: 1; }
   .ntext { font-size: 11.5px; }
-  .detail { margin-top: 10px; border: 1px solid var(--border, #ccc); border-radius: 8px; padding: 10px 14px; min-height: 64px; }
+  .detail { margin-top: 10px; border: 1px solid var(--border, #ccc); border-radius: 8px; padding: 10px 14px; min-height: 66px; }
   .detail h3 { margin: 0 0 4px; font-size: 14px; color: var(--accent, #3366cc); }
-  .detail p { margin: 0; font-size: 13px; line-height: 1.45; color: var(--foreground, #222); }
+  .detail p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--foreground, #222); }
   .hint { font-size: 11.5px; color: var(--muted-foreground, #777); margin: 6px 2px 0; }
 </style>
 </head>
 <body>
 <div class="wrap">
-<svg viewBox="0 0 960 520" width="100%" role="img" aria-label="Fast-slow control architecture">
+<svg viewBox="0 0 940 640" width="100%" role="img" aria-label="Arquitectura de control fast-slow">
   <defs>
-    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--foreground, #444)"></path>
     </marker>
-    <marker id="ahd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground, #777)"></path>
+    <marker id="ahd" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent, #3366cc)"></path>
     </marker>
   </defs>
 
+  <!-- banda bucle rapido -->
+  <rect class="band" x="30" y="86" width="612" height="226" rx="14"></rect>
+  <text class="bandlab" x="48" y="110">BUCLE RAPIDO · N_w ITERACIONES · MILISEGUNDOS POR PASO</text>
+
+  <!-- banda bucle lento -->
+  <rect class="band" x="168" y="398" width="600" height="168" rx="14"></rect>
+  <text class="bandlab" x="186" y="422">BUCLE LENTO · UNA LLAMADA CADA N_w ITERACIONES · SEGUNDOS</text>
+
+  <!-- problema -->
+  <g id="n1" class="gnode">
+    <rect class="stage" x="48" y="20" width="212" height="46" rx="8"></rect>
+    <text x="154" y="39" text-anchor="middle" font-size="12.5" font-weight="600">Problema variacional</text>
+    <text class="muted" x="154" y="56" text-anchor="middle" font-size="11.5">Hamiltoniano H · ansatz U(θ)</text>
+    <g class="badge"><circle cx="48" cy="20" r="10"></circle><text x="48" y="24" text-anchor="middle">1</text></g>
+  </g>
+
   <!-- warm start -->
-  <path class="edgeback" data-e="ws" d="M 110 118 L 110 52 L 485 52 L 485 292" marker-end="url(#ahd)"></path>
-  <text class="elab" x="297" y="44" text-anchor="middle">epoch 0: proposed initial angles from the symbolic description of H</text>
+  <path class="edgeback flow" data-e="ws" d="M 260 43 L 468 43 L 468 398" marker-end="url(#ahd)"></path>
+  <text class="elabA" x="364" y="34" text-anchor="middle">arranque: θ inicial propuesta por el LLM</text>
 
-  <!-- row 1 edges -->
-  <path class="edge" data-e="p-t" d="M 192 152 L 232 152" marker-end="url(#ah)"></path>
-  <path class="edge" data-e="t-s" d="M 302 152 L 332 152" marker-end="url(#ah)"></path>
-  <path class="edge" data-e="s-e" d="M 452 152 L 482 152" marker-end="url(#ah)"></path>
-  <path class="edge flow" data-e="loop" d="M 560 132 C 560 96, 280 96, 262 130" marker-end="url(#ah)"></path>
-  <text class="elab" x="411" y="92" text-anchor="middle">k = 1, ..., Nw</text>
-  <path class="edge" data-e="e-w" d="M 600 152 L 648 152" marker-end="url(#ah)"></path>
-  <path class="edge" data-e="w-l" d="M 730 194 L 730 262 L 640 300" marker-end="url(#ah)"></path>
+  <!-- flujo bucle rapido -->
+  <path class="edge" data-e="setup" d="M 154 66 L 154 130 L 132 130" marker-end="url(#ah)"></path>
+  <path class="edge" data-e="t-s" d="M 192 152 L 288 152" marker-end="url(#ah)"></path>
+  <path class="edge" data-e="s-e" d="M 412 152 L 502 152" marker-end="url(#ah)"></path>
+  <path class="edge flow" data-e="loop" d="M 566 132 C 566 92, 140 92, 124 128" marker-end="url(#ah)"></path>
+  <text class="elab" x="345" y="86" text-anchor="middle">k = 1, ..., N_w</text>
 
-  <!-- feedback -->
-  <path class="edgeback flow" data-e="fb" d="M 772 308 L 772 246 L 262 246 L 262 194" marker-end="url(#ahd)"></path>
-  <text class="elab" x="517" y="238" text-anchor="middle">applied to the angles every Nw iterations</text>
+  <!-- historial a telemetria -->
+  <path class="edge" data-e="hist" d="M 566 172 L 566 226 L 668 226 L 668 196" marker-end="url(#ah)"></path>
 
-  <!-- llm -> action -->
-  <path class="edge" data-e="l-a" d="M 642 352 L 698 352" marker-end="url(#ah)"></path>
+  <!-- telemetria a LLM -->
+  <path class="edge" data-e="w-l" d="M 736 250 L 736 330 L 452 330 L 452 452" marker-end="url(#ah)"></path>
+  <text class="elab" x="596" y="322" text-anchor="middle">ventana T_k como JSON (única entrada del controlador)</text>
 
-  <!-- row 1 nodes -->
-  <g id="n1" class="nodeg">
-    <rect class="stage" x="30" y="118" width="162" height="68" rx="6"></rect>
-    <text x="111" y="146" text-anchor="middle" font-size="13">Variational problem</text>
-    <text class="muted" x="111" y="166" text-anchor="middle" font-size="12.5">H, ansatz U(theta)</text>
-    <g class="badge"><circle cx="30" cy="118" r="10"></circle><text x="30" y="122" text-anchor="middle">1</text></g>
+  <!-- feedback intervencion -->
+  <path class="edgeback flow" data-e="fb" d="M 596 482 L 672 482 L 672 262 L 132 262 L 132 192" marker-end="url(#ahd)"></path>
+  <text class="elabA" x="400" y="254" text-anchor="middle">intervención aplicada a θ cada N_w pasos</text>
+
+  <!-- nodos bucle rapido -->
+  <g id="n2" class="gnode">
+    <rect class="stage" x="66" y="130" width="126" height="58" rx="8"></rect>
+    <text x="129" y="154" text-anchor="middle" font-size="12.5" font-weight="600">θ_k</text>
+    <text class="muted" x="129" y="172" text-anchor="middle" font-size="10.8">ángulos del circuito</text>
+    <g class="badge"><circle cx="66" cy="130" r="10"></circle><text x="66" y="134" text-anchor="middle">2</text></g>
+
+    <rect class="stage" x="288" y="130" width="124" height="58" rx="8"></rect>
+    <text x="350" y="152" text-anchor="middle" font-size="12.5" font-weight="600">Paso SPSA</text>
+    <text class="muted" x="350" y="168" text-anchor="middle" font-size="10.6">θ − a_k · ĝ_k (2 evaluaciones)</text>
+    <text class="muted" x="350" y="181" text-anchor="middle" font-size="10.6">del objetivo</text>
+
+    <rect class="stage" x="502" y="130" width="112" height="58" rx="8"></rect>
+    <text x="558" y="152" text-anchor="middle" font-size="12.5" font-weight="600">E(θ_k)</text>
+    <text class="muted" x="558" y="168" text-anchor="middle" font-size="10.6">⟨ψ(θ)|H|ψ(θ)⟩</text>
+    <text class="muted" x="558" y="181" text-anchor="middle" font-size="10.6">energía</text>
   </g>
 
-  <rect class="cluster" x="232" y="96" width="368" height="112" rx="8"></rect>
-  <text class="elab" x="416" y="110" text-anchor="middle">fast loop, Nw iterations at local speed</text>
-  <g id="n2" class="nodeg">
-    <rect class="stage" x="242" y="130" width="60" height="44" rx="5"></rect>
-    <text x="272" y="157" text-anchor="middle" font-size="12.5">theta_k</text>
-    <g class="badge"><circle cx="242" cy="130" r="10"></circle><text x="242" y="134" text-anchor="middle">2</text></g>
-    <rect class="stage" x="332" y="130" width="120" height="44" rx="5"></rect>
-    <text x="392" y="148" text-anchor="middle" font-size="12">SPSA step</text>
-    <text class="muted" x="392" y="164" text-anchor="middle" font-size="11">theta - a_k * g_hat</text>
-    <rect class="stage" x="482" y="130" width="108" height="44" rx="5"></rect>
-    <text x="536" y="148" text-anchor="middle" font-size="12">E(theta_k)</text>
-    <text class="muted" x="536" y="164" text-anchor="middle" font-size="11">&lt;psi|H|psi&gt;</text>
+  <!-- ventana telemetria -->
+  <g id="n3" class="gnode">
+    <rect class="stage" x="668" y="126" width="176" height="70" rx="8"></rect>
+    <text x="756" y="147" text-anchor="middle" font-size="12.3" font-weight="600">Ventana T_k</text>
+    <text class="muted" x="756" y="164" text-anchor="middle" font-size="10.2">[serie de E · ‖∇E‖ · η · Var(θ)]</text>
+    <text class="muted" x="756" y="180" text-anchor="middle" font-size="10.2">últimos N_w pasos</text>
+    <g class="badge"><circle cx="668" cy="126" r="10"></circle><text x="668" y="130" text-anchor="middle">3</text></g>
   </g>
 
-  <g id="n3" class="nodeg">
-    <rect class="stage" x="650" y="116" width="160" height="76" rx="6"></rect>
-    <text x="730" y="142" text-anchor="middle" font-size="12.5">Telemetry window T_k</text>
-    <text class="muted" x="730" y="160" text-anchor="middle" font-size="10.8">[E, ||grad E||, eta, Var(theta)]</text>
-    <text class="muted" x="730" y="176" text-anchor="middle" font-size="10.8">summarises the last Nw steps</text>
-    <g class="badge"><circle cx="650" cy="116" r="10"></circle><text x="650" y="120" text-anchor="middle">3</text></g>
+  <!-- LLM -->
+  <g id="n4" class="gnode">
+    <rect class="stage" x="240" y="452" width="224" height="60" rx="10"></rect>
+    <text x="352" y="476" text-anchor="middle" font-size="13" font-weight="600">LLM meta-optimizador</text>
+    <text class="muted" x="352" y="496" text-anchor="middle" font-size="10.8">temp 0 · semilla fija · latencia medida</text>
+    <g class="badge"><circle cx="240" cy="452" r="10"></circle><text x="240" y="456" text-anchor="middle">4</text></g>
+
+    <rect class="chip" x="496" y="440" width="112" height="26" rx="6"></rect>
+    <text class="chiptext" x="552" y="457" text-anchor="middle">diagnóstico (5 regímenes)</text>
+    <rect class="chip" x="618" y="440" width="112" height="26" rx="6"></rect>
+    <text class="chiptext" x="674" y="457" text-anchor="middle">justificación (2 frases)</text>
+    <rect class="chip" x="496" y="474" width="112" height="26" rx="6"></rect>
+    <text class="chiptext" x="552" y="491" text-anchor="middle">efecto esperado</text>
+    <rect class="chip" x="618" y="474" width="112" height="26" rx="6"></rect>
+    <text class="chiptext" x="674" y="491" text-anchor="middle">acción</text>
   </g>
 
-  <!-- row 2 nodes -->
-  <g id="n4" class="nodeg">
-    <rect class="stage" x="330" y="292" width="312" height="122" rx="8"></rect>
-    <text x="486" y="316" text-anchor="middle" font-size="13">LLM meta-optimizer (slow loop)</text>
-    <text class="muted" x="486" y="340" text-anchor="middle" font-size="12">system prompt + telemetry window as JSON</text>
-    <text class="muted" x="486" y="360" text-anchor="middle" font-size="12">diagnosis, justification, expected effect</text>
-    <text class="muted" x="486" y="380" text-anchor="middle" font-size="12">one JSON object, validated by a schema</text>
-    <text class="muted" x="486" y="400" text-anchor="middle" font-size="11">temperature 0, fixed seed, latency measured per call</text>
-    <g class="badge"><circle cx="330" cy="292" r="10"></circle><text x="330" y="296" text-anchor="middle">4</text></g>
+  <!-- accion -->
+  <g id="n5" class="gnode">
+    <rect class="stage" x="512" y="534" width="220" height="52" rx="8"></rect>
+    <text x="622" y="555" text-anchor="middle" font-size="12.3" font-weight="600">Intervención</text>
+    <text class="muted" x="622" y="573" text-anchor="middle" font-size="10.8">η·factor · +N(0,σ) en θ · reinicio</text>
+    <g class="badge"><circle cx="512" cy="534" r="10"></circle><text x="512" y="538" text-anchor="middle">5</text></g>
   </g>
+  <path class="edge" data-e="l-a" d="M 622 512 L 622 534" marker-end="url(#ah)"></path>
 
-  <g id="n5" class="nodeg">
-    <rect class="stage" x="700" y="312" width="140" height="80" rx="6"></rect>
-    <text x="770" y="338" text-anchor="middle" font-size="12.5">Intervention a</text>
-    <text class="muted" x="770" y="356" text-anchor="middle" font-size="11.5">eta scale x</text>
-    <text class="muted" x="770" y="372" text-anchor="middle" font-size="11.5">sigma noise, restart</text>
-    <g class="badge"><circle cx="700" cy="312" r="10"></circle><text x="700" y="316" text-anchor="middle">5</text></g>
-  </g>
-
-  <!-- audit strip -->
-  <rect class="note" x="60" y="452" width="400" height="56" rx="6"></rect>
-  <text class="ntext" x="76" y="476">Latency accounting: t_call measured per call,</text>
-  <text class="ntext" x="76" y="494">failed calls included in the cost model.</text>
-  <rect class="note" x="500" y="452" width="400" height="56" rx="6"></rect>
-  <text class="ntext" x="516" y="476">XAI audit: declared effect vs observed effect,</text>
-  <text class="ntext" x="516" y="494">diagnosis compared with the ground-truth regime.</text>
+  <!-- franja auditoria -->
+  <rect class="note" x="48" y="600" width="408" height="40" rx="6"></rect>
+  <text class="ntext" x="64" y="617">Latencia: t_call medida por llamada,</text>
+  <text class="ntext" x="64" y="632">los fallos cuentan en el coste.</text>
+  <rect class="note" x="480" y="600" width="408" height="40" rx="6"></rect>
+  <text class="ntext" x="496" y="617">Auditoría XAI: efecto declarado vs observado,</text>
+  <text class="ntext" x="496" y="632">diagnóstico vs régimen ground truth.</text>
 </svg>
 
 <div class="detail" id="detail">
-  <h3>Fast-slow control architecture</h3>
-  <p>Click a stage to see what it does. Hover highlights the data flow. Dashed arrows are the two cross-loop couplings: the warm start at epoch 0 and the intervention applied every Nw iterations.</p>
+  <h3>Arquitectura de control fast-slow</h3>
+  <p>Pasa el ratón o haz clic sobre cada etapa numerada. Las flechas continuas son datos que suben hacia el controlador, las punteadas azules son las dos conexiones cruzadas: el arranque (warm-start) y la intervención.</p>
 </div>
-<p class="hint">Matches Figure 1 of the manuscript (paper/fig_methodology.tex).</p>
+<p class="hint">Equivale a la Figura 1 del manuscrito (paper/fig_methodology.tex), con etiquetas en español.</p>
 </div>
 
 <script>
-const DETAILS = {
-  1: ["1. Variational problem",
-      "A Hamiltonian H and an ansatz U(theta) define the instance, for example the two-qubit Heisenberg model. The optimizer minimises E(theta) = <psi(theta)|H|psi(theta)>."],
-  2: ["2. Fast loop (SPSA)",
-      "The classical stochastic optimizer runs Nw iterations between two controller queries. Each step estimates the gradient with two energy evaluations and updates the angles at local speed, milliseconds per step."],
-  3: ["3. Telemetry window",
-      "After Nw steps the history is compressed into one JSON window: the energy series, its slope and spread, the gradient norm, the learning rate and the dispersion of theta. This is the only thing the controller ever sees."],
-  4: ["4. LLM meta-optimizer (slow loop)",
-      "One call every Nw iterations. The model receives the system prompt and the window and must answer with one JSON object: a diagnosis from a closed list of five regimes, a two-sentence justification anchored to the numbers, a predicted gap reduction and one intervention. Temperature 0 and a fixed seed keep it reproducible, and the per-call latency is measured because it is the central quantity of the cost model."],
-  5: ["5. Intervention",
-      "The only levers: scale the SPSA step size (eta_scale), inject Gaussian noise into every angle (noise_sigma) or restart the angles. If the call fails the action is a no-op, so a dead endpoint degrades the run to plain SPSA instead of killing it."]
+const D = {
+  1: ["1. Problema variacional",
+      "Un Hamiltoniano H y un ansatz U(θ) definen la instancia, por ejemplo el modelo de Heisenberg de dos cúbits. Se optimiza E(θ) = ⟨ψ(θ)|H|ψ(θ)⟩. De aquí salen dos caminos: la instancia hacia el bucle rápido y la descripción simbólica hacia el LLM en el arranque."],
+  2: ["2. Bucle rápido (SPSA)",
+      "El optimizador clásico corre N_w iteraciones sin supervisión. Cada paso estima el gradiente con solo dos evaluaciones de energía y actualiza los ángulos en milisegundos. Es la razón de ser de la arquitectura: cientos de pasos de coste casi nulo entre dos llamadas caras."],
+  3: ["3. Ventana de telemetría",
+      "Tras N_w pasos, el historial se comprime en un único JSON: serie de energías, pendiente y dispersión, norma del gradiente, tasa de aprendizaje y dispersión de θ. Es lo único que el controlador ve del problema, y es también lo que usan los controladores baselines para comparar en igualdad de condiciones."],
+  4: ["4. LLM meta-optimizador",
+      "Una llamada cada N_w iteraciones. Recibe el prompt fijo más la ventana y devuelve un único JSON validado por esquema: diagnóstico de una lista cerrada de cinco regímenes, justificación de dos frases anclada a los números, efecto esperado y la acción. Temperatura 0 y semilla fija para reproducibilidad. Si la llamada falla, la acción es no-op y el run continúa como SPSA puro."],
+  5: ["5. Intervención",
+      "Tres palancas, y solo estas: escalar el tamaño de paso del SPSA (η·factor), inyectar ruido gaussiano en todos los ángulos (σ) o reiniciar los ángulos. No se toca el ansatz ni el gradiente. La flecha punteada sube de vuelta al bucle rápido y el ciclo se repite."]
 };
-const EDGES = {
-  1: ["ws", "p-t"],
-  2: ["p-t", "t-s", "s-e", "loop", "fb"],
-  3: ["e-w", "w-l"],
-  4: ["w-l", "l-a", "ws"],
+const E = {
+  1: ["ws", "setup"],
+  2: ["setup", "t-s", "s-e", "loop", "fb"],
+  3: ["hist", "w-l"],
+  4: ["ws", "w-l", "l-a"],
   5: ["l-a", "fb"]
 };
 const detail = document.getElementById("detail");
 function show(n) {
-  const d = DETAILS[n];
+  const d = D[n];
   detail.innerHTML = "<h3>" + d[0] + "</h3><p>" + d[1] + "</p>";
-  document.querySelectorAll(".nodeg").forEach(g => g.classList.toggle("active", g.id === "n" + n));
-  document.querySelectorAll("[data-e]").forEach(e => e.classList.toggle("active", (EDGES[n] || []).includes(e.dataset.e)));
+  document.querySelectorAll(".gnode").forEach(g => g.classList.toggle("active", g.id === "n" + n));
+  document.querySelectorAll("[data-e]").forEach(e => e.classList.toggle("active", (E[n] || []).includes(e.dataset.e)));
 }
-document.querySelectorAll(".nodeg").forEach(g => {
+document.querySelectorAll(".gnode").forEach(g => {
   const n = g.id.replace("n", "");
   g.addEventListener("click", () => show(n));
   g.addEventListener("mouseenter", () => show(n));
 });
 </script>
-<style> .edge.active, .edgeback.active { stroke: var(--accent, #3366cc); stroke-width: 2.4; } </style>
+<style> .edge.active { stroke: var(--accent, #3366cc); stroke-width: 2.6; } </style>
 </body>
 </html>
