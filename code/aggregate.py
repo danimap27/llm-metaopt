@@ -21,9 +21,13 @@ import pathlib
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence
 
+import numpy as np
+
 from .stats import bootstrap_ci, cohens_d_paired, holm_bonferroni, paired_permutation_test
+from .xai import explanation_report
 
 BASELINE_CONDITION = "spsa"
+DRIFT_BASELINE_CONDITION = "drift_spsa"
 
 
 def load_results(path: str | pathlib.Path) -> List[Dict[str, Any]]:
@@ -39,6 +43,20 @@ def load_results(path: str | pathlib.Path) -> List[Dict[str, Any]]:
     return records
 
 
+def load_drift_records(path: str | pathlib.Path) -> List[Dict[str, Any]]:
+    """Drift-block records (``kind == "drift_run"``) from a results file."""
+    records: List[Dict[str, Any]] = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            if record.get("kind") == "drift_run":
+                records.append(record)
+    return records
+
+
 def group_by_condition(records: Sequence[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for record in records:
@@ -46,17 +64,22 @@ def group_by_condition(records: Sequence[Dict[str, Any]]) -> Dict[str, List[Dict
     return dict(grouped)
 
 
+def _pair_key(record: Dict[str, Any]) -> str:
+    """Pairing key shared by every condition of the same physical run."""
+    return str(record.get("base_id") or record.get("run_id"))
+
+
 def paired_values(
     condition_records: Sequence[Dict[str, Any]],
     baseline_records: Sequence[Dict[str, Any]],
     field: str = "final_gap",
 ) -> tuple[List[float], List[float], List[str]]:
-    """Align two conditions by ``base_id`` so the comparison stays paired."""
-    baseline_map = {record["base_id"]: record for record in baseline_records}
+    """Align two conditions by pairing key so the comparison stays within-run."""
+    baseline_map = {_pair_key(record): record for record in baseline_records}
     pairs = [
-        (record[field], baseline_map[record["base_id"]][field], record["base_id"])
+        (record[field], baseline_map[_pair_key(record)][field], _pair_key(record))
         for record in condition_records
-        if record["base_id"] in baseline_map
+        if _pair_key(record) in baseline_map
     ]
     if not pairs:
         return [], [], []
@@ -157,6 +180,162 @@ def to_latex(summary: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def summarize_drift(records: Sequence[Dict[str, Any]], seed: int = 0) -> Dict[str, Any]:
+    """Per-condition drift metrics with paired tests against plain SPSA."""
+    grouped = group_by_condition(records)
+    baseline = grouped.get(DRIFT_BASELINE_CONDITION, [])
+    rows: List[Dict[str, Any]] = []
+    pending_p: List[float] = []
+    pending_rows: List[Dict[str, Any]] = []
+
+    def _mean(values: Sequence[Any]) -> Optional[float]:
+        clean = [float(value) for value in values if value is not None]
+        return float(np.mean(clean)) if clean else None
+
+    for condition, condition_records in sorted(grouped.items()):
+        areas = [float(record["area_under_gap"]) for record in condition_records]
+        stats = bootstrap_ci(areas, seed=seed)
+        row: Dict[str, Any] = {
+            "condition": condition,
+            "n": int(stats["n"]),
+            "area_mean": float(stats["mean"]),
+            "area_std": float(stats["std"]),
+            "area_ci_low": float(stats["ci_low"]),
+            "area_ci_high": float(stats["ci_high"]),
+            "final_gap_mean": _mean([record.get("final_gap") for record in condition_records]),
+            "detection_latency_mean": _mean([record.get("detection_latency") for record in condition_records]),
+            "detection_rate": _mean(
+                [1.0 if record.get("detection_latency") is not None else 0.0 for record in condition_records]
+            ),
+            "recovery_steps_mean": _mean([record.get("recovery_steps") for record in condition_records]),
+            "recovery_rate": _mean(
+                [1.0 if record.get("recovery_steps") is not None else 0.0 for record in condition_records]
+            ),
+            "interventions_mean": _mean([record.get("n_changes") for record in condition_records]),
+            "reverted_mean": _mean([record.get("n_reverted") for record in condition_records]),
+            "p_value": None,
+            "p_adjusted": None,
+            "effect_size_dz": None,
+        }
+        if condition != DRIFT_BASELINE_CONDITION and baseline:
+            values, base_values, _ = paired_values(condition_records, baseline, field="area_under_gap")
+            if values:
+                test = paired_permutation_test(values, base_values, seed=seed)
+                row["p_value"] = float(test["p_value"])
+                row["effect_size_dz"] = cohens_d_paired(values, base_values)
+                pending_p.append(float(test["p_value"]))
+                pending_rows.append(row)
+        rows.append(row)
+
+    if pending_p:
+        for row, corrected in zip(pending_rows, holm_bonferroni(pending_p)):
+            row["p_adjusted"] = float(corrected["p_adjusted"])
+
+    return {"conditions": rows, "n_runs": len(records), "baseline": DRIFT_BASELINE_CONDITION}
+
+
+def to_markdown_drift(summary: Dict[str, Any]) -> str:
+    """Markdown table of the drift block."""
+    lines = [
+        "| Condition | Runs | Area under gap (mean plus/minus 95 percent CI) | Final gap | Detection rate | "
+        "Detection latency | Recovery rate | Recovery steps | Interventions | Reverted | p (Holm) |\n",
+        "|---|---|---|---|---|---|---|---|---|---|---|\n",
+    ]
+    for row in summary["conditions"]:
+        p_value = "not applicable" if row["p_adjusted"] is None else f'{row["p_adjusted"]:.3g}'
+        final_gap = "n/a" if row["final_gap_mean"] is None else f'{row["final_gap_mean"]:.4f}'
+        latency = "n/a" if row["detection_latency_mean"] is None else f'{row["detection_latency_mean"]:.1f}'
+        recovery = "n/a" if row["recovery_steps_mean"] is None else f'{row["recovery_steps_mean"]:.1f}'
+        lines.append(
+            f'| {row["condition"]} | {row["n"]} | {row["area_mean"]:.2f} '
+            f'plus/minus {0.5 * (row["area_ci_high"] - row["area_ci_low"]):.2f} | {final_gap} '
+            f'| {row["detection_rate"]:.2f} | {latency} | {row["recovery_rate"]:.2f} | {recovery} '
+            f'| {row["interventions_mean"]:.1f} | {row["reverted_mean"]:.1f} | {p_value} |\n'
+        )
+    return "".join(lines)
+
+
+def to_latex_drift(summary: Dict[str, Any]) -> str:
+    """LaTeX table of the drift block."""
+    table_amp = " " + chr(38) + " "
+    row_end = chr(92) + chr(92)
+    lines = [
+        "% Generated by code.aggregate -- do not edit by hand.",
+        chr(92) + "begin{table}[t]",
+        chr(92) + "centering",
+        chr(92) + "caption{Drifting-objective block. The area under the absolute gap curve measures how far the "
+        "run stays from the exact minimum of the current objective. Detection rate is the fraction of "
+        "boundaries followed by a real intervention. Recovery rate is the fraction of boundaries where the run "
+        "returns inside the convergence threshold before the next drift. Values are compared against plain "
+        "SPSA with a paired sign-flip permutation test, Holm-Bonferroni corrected.}",
+        chr(92) + "label{tab:drift}",
+        chr(92) + "begin{tabular}{lrrrrrr}",
+        chr(92) + "toprule",
+        "Condition" + table_amp + "Runs" + table_amp + "Area under gap" + table_amp + "Final gap"
+        + table_amp + "Detect. rate" + table_amp + "Recover. rate" + table_amp + "$p_{\mathrm{Holm}}$ " + row_end,
+        chr(92) + "midrule",
+    ]
+    for row in summary["conditions"]:
+        p_value = "--" if row["p_adjusted"] is None else f'{row["p_adjusted"]:.3g}'
+        final_gap = "--" if row["final_gap_mean"] is None else f'{row["final_gap_mean"]:.4f}'
+        condition_label = str(row["condition"]).replace("_", chr(92) + "_")
+        lines.append(
+            condition_label + table_amp + f'{row["n"]}' + table_amp
+            + f'${row["area_mean"]:.2f} ' + chr(92) + f'pm {0.5 * (row["area_ci_high"] - row["area_ci_low"]):.2f}$'
+            + table_amp + final_gap + table_amp + f'{row["detection_rate"]:.2f}' + table_amp
+            + f'{row["recovery_rate"]:.2f}' + table_amp + p_value + " " + row_end
+        )
+    lines += [chr(92) + "bottomrule", chr(92) + "end{tabular}", chr(92) + "end{table}", ""]
+    return "\n".join(lines)
+
+
+def explanation_table(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pair the expected effect of every language-model call with the observed effect.
+
+    The expected effect is what the model stated it wanted to achieve over the
+    next window. The observed effect is the actual gap reduction over that same
+    window, taken from the energy curve and the exact minimum of the run.
+    """
+    predicted: List[float] = []
+    observed: List[float] = []
+    for record in records:
+        if record.get("condition") != "spsa_llm":
+            continue
+        energies = [float(value) for value in record.get("energy_curve", [])]
+        if len(energies) < 2:
+            continue
+        e_min = float(record.get("meta", {}).get("e_min", 0.0))
+        n_window = int(record.get("meta", {}).get("n_window", 10))
+        for event in record.get("events", []):
+            expected = event.get("expected_effect")
+            if not isinstance(expected, (int, float)):
+                continue
+            start = int(event["step"])
+            end = min(start + n_window, len(energies) - 1)
+            if start >= len(energies) or end <= start:
+                continue
+            predicted.append(float(expected))
+            observed.append((energies[start] - e_min) - (energies[end] - e_min))
+    if not predicted:
+        return {"n": 0}
+    return explanation_report(predicted, observed)
+
+
+def explanation_markdown(report: Dict[str, Any]) -> str:
+    """Single-table report of the explanation-fidelity metrics."""
+    if report.get("n", 0) == 0:
+        return "No language-model events were scored.\n"
+    return (
+        "| Metric | Value |\n|---|---|\n"
+        f'| Calls scored | {report["n"]} |\n'
+        f'| Signed accuracy | {report["signed_accuracy"]:.3f} |\n'
+        f'| Pearson r | {report["pearson_r"]:.3f} |\n'
+        f'| Mean absolute error (energy units) | {report["mae"]:.4f} |\n'
+        f'| Mean predicted effect | {report["mean_predicted"]:.4f} |\n'
+        f'| Mean observed effect | {report["mean_observed"]:.4f} |\n'
+    )
+
+
 def write_csv(path: pathlib.Path, records: Sequence[Dict[str, Any]]) -> None:
     fields = [
         "run_id",
@@ -191,19 +370,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     records = load_results(args.results)
-    if not records:
-        print(f"[aggregate] no run records found in {args.results}")
+    drift_records = load_drift_records(args.results)
+    if not records and not drift_records:
+        print(f"[aggregate] no run or drift records found in {args.results}")
         return 1
 
-    summary = summarize(records, seed=args.seed)
     out_dir = pathlib.Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "summary.md").write_text(to_markdown(summary), encoding="utf-8")
-    (out_dir / "summary.tex").write_text(to_latex(summary), encoding="utf-8")
-    write_csv(out_dir / "per_run.csv", records)
 
-    print(to_markdown(summary))
-    print(f"[aggregate] wrote {out_dir}/summary.md, summary.tex and per_run.csv ({summary['n_runs']} runs)")
+    if records:
+        summary = summarize(records, seed=args.seed)
+        (out_dir / "summary.md").write_text(to_markdown(summary), encoding="utf-8")
+        (out_dir / "summary.tex").write_text(to_latex(summary), encoding="utf-8")
+        write_csv(out_dir / "per_run.csv", records)
+        print(to_markdown(summary))
+
+        explanation = explanation_table(records)
+        (out_dir / "explanation.md").write_text(explanation_markdown(explanation), encoding="utf-8")
+        print(
+            "[aggregate] explanation fidelity: "
+            f"n={explanation.get('n', 0)} signed_accuracy={explanation.get('signed_accuracy', 'n/a')}"
+        )
+
+    if drift_records:
+        drift_summary = summarize_drift(drift_records, seed=args.seed)
+        (out_dir / "drift_summary.md").write_text(to_markdown_drift(drift_summary), encoding="utf-8")
+        (out_dir / "drift_summary.tex").write_text(to_latex_drift(drift_summary), encoding="utf-8")
+        print(to_markdown_drift(drift_summary))
+
+    print(
+        f"[aggregate] wrote tables into {out_dir} "
+        f"({len(records)} closed-loop runs, {len(drift_records)} drift runs)"
+    )
     return 0
 
 
