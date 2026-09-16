@@ -34,8 +34,10 @@ sweep:
 # (see docs/local-serving.md). The exact tag and quantization are recorded with
 # every run and pinned in the manuscript.
 llm:
-  base_url: http://127.0.0.1:11434/v1
+  base_url: http://127.0.0.1:11434
   model: qwen3.5:4b
+  api_style: ollama        # the native endpoint is the only one that honours think=false
+  no_think: true           # a reasoning model with thinking on returns no decision at all
   cache: results/llm_cache.jsonl
   replay: false
 

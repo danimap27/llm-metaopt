@@ -50,6 +50,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--mock-llm", action="store_true", help="offline smoke: the language model condition falls back to the detector controller")
     parser.add_argument("--llm-base-url", default="http://127.0.0.1:11434/v1")
     parser.add_argument("--llm-model", default="qwen3.5:4b")
+    parser.add_argument("--llm-api-style", default=None, choices=["openai", "ollama"])
     parser.add_argument("--cache", default=None, help="response cache path (enables replay)")
     parser.add_argument("--replay", action="store_true", help="serve every call from the cache")
     parser.add_argument("--dry-run", action="store_true")
@@ -83,6 +84,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LLMConfig(
             base_url=args.llm_base_url or llm_defaults.get("base_url", "http://127.0.0.1:11434/v1"),
             model=args.llm_model if args.llm_model != "qwen3.5:4b" else llm_defaults.get("model", args.llm_model),
+            api_style=str(args.llm_api_style or llm_defaults.get("api_style", "openai")),
+            no_think=bool(llm_defaults.get("no_think", False)),
         )
         if "drift_llm" in conditions
         else None

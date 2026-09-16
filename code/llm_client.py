@@ -1,18 +1,30 @@
 """Slow-loop client: the LLM as meta-optimizer.
 
-Works with any OpenAI-compatible endpoint (local Ollama, vLLM, OpenRouter).
-It records the per-call latency, which is the central quantity of the paper, and
-requests structured output through a JSON schema. The system prompt is kept in
-English because it is published verbatim in the paper.
+Two dialects are supported, because the same weights behave very differently
+depending on the server API:
+
+- ``api_style="openai"``: any OpenAI-compatible ``/v1/chat/completions`` endpoint.
+- ``api_style="ollama"``: the native Ollama ``/api/chat`` endpoint, which is the
+  only one that honours the ``think`` flag. Reasoning models routed through the
+  OpenAI-compatible layer put the whole chain of thought into ``reasoning`` and
+  return an empty ``content`` that finishes on the token limit, which costs tens
+  of seconds and produces no decision at all. Measured on the reference machine:
+  2.2 seconds with the native endpoint and thinking disabled against 60 to 90
+  seconds without a usable answer through the OpenAI layer.
+
+The client records the per-call latency, which is the central quantity of the
+paper, and requests structured output through a JSON schema in both dialects.
+The system prompt stays in English because it is published verbatim.
 """
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
+
 import json
 import re
 import time
-from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -73,9 +85,10 @@ Rules: answer with JSON only, follow the schema, keep justification under two se
 class LLMConfig:
     """Endpoint and sampling configuration (reproducibility)."""
 
-    base_url: str = "http://localhost:11434/v1"
+    base_url: str = "http://127.0.0.1:11434/v1"
     model: str = "qwen3.5:4b"
     api_key: str = ""
+    api_style: str = "openai"  # "openai" or "ollama"
     temperature: float = 0.0
     seed: int = 0
     max_tokens: int = 400
@@ -104,14 +117,47 @@ def build_messages(window: Dict[str, Any], cfg: Optional[LLMConfig] = None) -> L
     ]
 
 
+def endpoint_url(cfg: LLMConfig) -> str:
+    """POST target for the configured dialect."""
+    base = cfg.base_url.rstrip("/")
+    if cfg.api_style == "ollama":
+        if base.endswith("/v1"):
+            base = base[: -len("/v1")]
+        if base.endswith("/api"):
+            return base + "/chat"
+        return base + "/api/chat"
+    return base + "/chat/completions"
+
+
 def build_request_payload(
     window: Dict[str, Any],
     cfg: LLMConfig,
     use_json_schema: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """OpenAI-compatible payload (inspectable offline, used by the tests)."""
+    """Request payload for the configured dialect (inspectable offline)."""
     schema = cfg.use_json_schema if use_json_schema is None else use_json_schema
-    payload: Dict[str, Any] = {
+
+    if cfg.api_style == "ollama":
+        payload: Dict[str, Any] = {
+            "model": cfg.model,
+            "messages": build_messages(window, cfg),
+            "stream": False,
+            "options": {
+                "temperature": cfg.temperature,
+                "seed": cfg.seed,
+                "num_predict": cfg.max_tokens,
+            },
+        }
+        if cfg.no_think:
+            payload["think"] = False
+        if schema is True:
+            payload["format"] = DECISION_SCHEMA["schema"]
+        elif schema == "json_object":
+            payload["format"] = "json"
+        payload.update(cfg.extra_body)
+        return payload
+
+    payload = {
         "model": cfg.model,
         "messages": build_messages(window, cfg),
         "temperature": cfg.temperature,
@@ -127,6 +173,24 @@ def build_request_payload(
     return payload
 
 
+def extract_content(data: Dict[str, Any], cfg: LLMConfig) -> tuple[str, str, Optional[Dict[str, Any]]]:
+    """Return ``(content, reasoning, usage)`` from either response shape."""
+    if cfg.api_style == "ollama":
+        message = data.get("message", {}) or {}
+        content = message.get("content") or ""
+        reasoning = message.get("thinking") or ""
+        usage = {
+            "prompt_tokens": data.get("prompt_eval_count"),
+            "completion_tokens": data.get("eval_count"),
+        }
+    else:
+        message = (data.get("choices") or [{}])[0].get("message", {}) or {}
+        content = message.get("content") or ""
+        reasoning = message.get("reasoning") or message.get("reasoning_content") or ""
+        usage = data.get("usage")
+    return content, reasoning, usage
+
+
 def parse_decision(text: str) -> Dict[str, Any]:
     """Extract and validate the JSON decision from the model response."""
     if not text or not text.strip():
@@ -139,7 +203,9 @@ def parse_decision(text: str) -> Dict[str, Any]:
     decision = json.loads(match.group(0))
     for key in ("diagnosis", "justification", "action"):
         if key not in decision:
-            raise ValueError(f"missing field {key!r} in the decision")
+            raise ValueError(
+                f"missing field {key!r} in the decision. Keys received: {sorted(decision)[:8]}"
+            )
     action = decision["action"]
     for key in ("eta_scale", "noise_sigma", "restart"):
         if key not in action:
@@ -159,14 +225,14 @@ def decide(
     cfg: LLMConfig,
     session: Optional[requests.Session] = None,
 ) -> Dict[str, Any]:
-    """Query the LLM and return the decision plus its latency.
+    """Query the endpoint and return the decision plus its latency.
 
-    If the server rejects ``response_format`` with a JSON schema, the call is
-    retried without it. Latency is always measured around the POST with
-    ``time.perf_counter``.
+    Three variants are attempted in order: the strict JSON schema, a plain JSON
+    mode and no structured output at all, so a weaker server still yields a
+    parsable answer. Latency is always measured around the POST.
     """
     session = requests.Session() if session is None else session
-    url = cfg.base_url.rstrip("/") + "/chat/completions"
+    url = endpoint_url(cfg)
     headers = {"Content-Type": "application/json"}
     if cfg.api_key:
         headers["Authorization"] = f"Bearer {cfg.api_key}"
@@ -176,26 +242,27 @@ def decide(
     for use_schema in variants:
         payload = build_request_payload(window, cfg, use_json_schema=use_schema)
         started = time.perf_counter()
+        raw = ""
         try:
             response = session.post(url, json=payload, headers=headers, timeout=cfg.timeout)
             latency = time.perf_counter() - started
             response.raise_for_status()
             data = response.json()
-            message = data["choices"][0].get("message", {})
-            raw = message.get("content") or ""
-            if not raw.strip() and (message.get("reasoning") or message.get("reasoning_content")):
+            raw, reasoning, usage = extract_content(data, cfg)
+            if not raw.strip() and reasoning:
                 raise ValueError(
                     "empty content: the endpoint returned only reasoning. "
-                    "Disable thinking (no_think) or raise max_tokens."
+                    "Use api_style=ollama with no_think, or raise max_tokens."
                 )
             decision = parse_decision(raw)
             return {
                 "ok": True,
                 "model": cfg.model,
+                "api_style": cfg.api_style,
                 "latency_s": latency,
                 "decision": decision,
                 "raw": raw,
-                "usage": data.get("usage"),
+                "usage": usage,
                 "used_json_schema": use_schema,
             }
         except Exception as exc:  # noqa: BLE001 - recorded and retried without schema
@@ -204,9 +271,17 @@ def decide(
                     "error": repr(exc),
                     "used_json_schema": use_schema,
                     "latency_s": time.perf_counter() - started,
+                    "raw_snippet": raw[:400],
                 }
             )
-    return {"ok": False, "model": cfg.model, "latency_s": None, "decision": None, "attempts": attempts}
+    return {
+        "ok": False,
+        "model": cfg.model,
+        "api_style": cfg.api_style,
+        "latency_s": None,
+        "decision": None,
+        "attempts": attempts,
+    }
 
 
 def decide_cached(

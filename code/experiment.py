@@ -296,6 +296,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--llm-timeout", type=float, default=None)
     parser.add_argument("--llm-max-tokens", type=int, default=None)
     parser.add_argument("--llm-no-think", action="store_true", help="force the /no_think hint")
+    parser.add_argument("--llm-api-style", default=None, choices=["openai", "ollama"])
     parser.add_argument("--cache", default=None, help="response cache path (enables replay)")
     parser.add_argument("--replay", action="store_true", help="serve every call from the cache")
     parser.add_argument("--mock-llm", action="store_true", help="use the heuristic controller instead of the LLM (offline smoke test)")
@@ -335,13 +336,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         model=llm_model,
         timeout=llm_timeout,
         max_tokens=llm_max_tokens,
+        api_style=str(args.llm_api_style or llm_defaults.get("api_style", "openai")),
         no_think=bool(args.llm_no_think or llm_defaults.get("no_think", False)),
         extra_body=dict(llm_defaults.get("extra_body", {}) or {}),
     )
     if "spsa_llm" in conditions:
         print(
             f"[experiment] LLM endpoint: {llm_cfg.base_url} model={llm_cfg.model} "
-            f"cache={cache_path} replay={replay}"
+            f"style={llm_cfg.api_style} no_think={llm_cfg.no_think} cache={cache_path} replay={replay}"
         )
 
     spsa_cfg = SPSAConfig(**cfg["spsa"])
