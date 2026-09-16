@@ -14,6 +14,8 @@
 \usepackage[hidelinks]{hyperref}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
 
 \title{Language Models as Heuristic Meta-Optimizers and Intelligent Initializers for Variational Quantum Algorithms with Integrated Explainability}
 \author{Daniel Mart\'in P\'erez\thanks{Data Science and Big Data Research Lab, Universidad Pablo de Olavide, Seville, Spain.}}
@@ -69,6 +71,7 @@ E(\vec{\theta}) = \langle \psi(\vec{\theta}) \rvert H \lvert \psi(\vec{\theta}) 
 \section{Method}
 \subsection{Fast-slow loop}
 % Algorithm 1: SPSA for N_w steps, query the controller, apply the action.
+\input{fig_methodology.tex}
 \begin{algorithm}
 \caption{SPSA with a slow-loop controller}\label{alg:fastslow}
 \begin{algorithmic}[1]

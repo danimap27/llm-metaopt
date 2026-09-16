@@ -1,0 +1,80 @@
+% Figure: the fast-slow control architecture.
+% Included from main.tex. The preamble of main.tex loads the tikz package and
+% the arrows.meta, positioning, fit and backgrounds libraries.
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    font=\footnotesize,
+    node distance=5mm and 6mm,
+    every node/.style={align=center},
+    stage/.style={draw, rounded corners=2pt, inner sep=6pt, fill=black!5},
+    cluster/.style={draw, rounded corners=3pt},
+    flow/.style={-{Stealth[length=2.2mm]}, thick},
+    back/.style={-{Stealth[length=2.2mm]}, thick, dashed},
+    note/.style={draw, rounded corners=2pt, inner sep=5pt, fill=black!3, font=\scriptsize},
+    badge/.style={circle, draw, inner sep=1.2pt, font=\tiny, fill=white},
+]
+% --- row 1: the fast loop -------------------------------------------
+\node[stage] (problem) {Variational problem\\[1pt] $H$, \quad ansatz $U(\vec{\theta})$};
+\node[badge, above=0.5mm of problem] {1};
+\node[stage, right=of problem] (theta) {$\vec{\theta}_k$};
+\node[stage, right=of theta] (spsa) {SPSA step\\[1pt] $\vec{\theta}_{k+1} = \vec{\theta}_k - a_k \hat{g}_k$};
+\node[stage, right=of spsa] (energy) {$E(\vec{\theta}_k) = \langle \psi(\vec{\theta}_k) \rvert H \lvert \psi(\vec{\theta}_k) \rangle$};
+\begin{scope}[on background layer]
+  \node[cluster, fill=black!10, fit=(theta)(spsa)(energy), inner sep=8pt,
+        label={[font=\scriptsize\itshape]above:fast loop, $N_w$ iterations at local speed}] (fast) {};
+\end{scope}
+\node[badge, above=0.5mm of fast] {2};
+\draw[flow] (problem) -- (theta);
+\draw[flow] (theta) -- (spsa);
+\draw[flow] (spsa) -- (energy);
+\draw[flow] (energy.north) .. controls +(up:5mm) and +(up:5mm) .. node[above, font=\scriptsize] {$k = 1, \ldots, N_w$} (theta.north);
+
+\node[stage, right=9mm of energy] (window) {Telemetry window $T_k$\\[1pt]
+  $\bigl[ E_{k - N_w : k}, \, \lVert \nabla E \rVert_2, \, \eta_k, \, \mathrm{Var}(\vec{\theta}) \bigr]$};
+\node[badge, above=0.5mm of window] {3};
+\draw[flow] (energy) -- (window);
+
+% --- warm start ------------------------------------------------------
+\coordinate (wsa) at ([yshift=8mm]problem.north);
+\coordinate (wsb) at ([yshift=8mm]fast.north -| window);
+\draw[back] (problem.north) -- (wsa) -| (wsb) node[above, font=\scriptsize, pos=0.4]
+  {epoch $0$: proposed $\vec{\theta}^{(0)}$ from the symbolic description of $H$};
+
+% --- row 2: the slow loop -------------------------------------------
+\node[cluster, fill=black!10, below=12mm of fast.south -| window, inner sep=8pt] (llm) {%
+  LLM meta-optimizer (slow loop)\\[2pt]
+  \begin{tabular}{@{}r@{\ }l@{}}
+    input: & system prompt + telemetry window \\
+    output: & diagnosis, justification, expected effect \\
+    format: & one JSON object, validated by a schema \\
+  \end{tabular}};
+\node[badge, left=1mm of llm] {4};
+\draw[flow] (window.south) -- (llm.north -| window);
+
+\node[stage, right=9mm of llm] (action) {Intervention $a$\\[1pt]
+  $\eta$ scaled, $\sigma$ noise, restart};
+\node[badge, above=0.5mm of action] {5};
+\draw[flow] (llm) -- (action);
+
+% --- feedback --------------------------------------------------------
+\draw[back] (action.north) -- ++(0,4mm) -| node[above, font=\scriptsize, pos=0.35]
+  {applied to $\vec{\theta}$ every $N_w$ iterations} (theta.south);
+
+% --- audit strip -----------------------------------------------------
+\node[note, below=7mm of llm.south -| spsa, xshift=-14mm] (latency)
+  {latency accounting: $t_{\mathrm{call}}$ measured per call, failed calls included in the cost};
+\node[note, right=6mm of latency] (fidelity)
+  {XAI audit: declared effect vs.\ observed effect, diagnosis vs.\ ground-truth regime};
+\end{tikzpicture}%
+}
+\caption{The fast-slow control architecture. A stochastic local optimizer
+improves the variational angles for $N_w$ iterations between two slow-loop
+queries. The controller receives a telemetry window and returns a diagnosis, a
+justification, a predicted effect and one intervention. The intervention is
+limited to a scaling of the learning rate, a Gaussian perturbation of the
+angles and a restart, and it is applied to the angles without modifying the
+ansatz.}
+\label{fig:methodology}
+\end{figure}
