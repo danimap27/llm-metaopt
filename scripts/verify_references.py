@@ -108,9 +108,14 @@ def bibtex_from_arxiv(meta: Dict[str, Any]) -> str:
         lines.append(f"  doi          = {{{meta['doi']}}},")
     if meta["journal_ref"]:
         lines.append(f"  note         = {{Published as: {meta['journal_ref']}}},")
-    lines.append(f"  % VERIFIED: {meta['abs_url']}")
     lines.append("}")
     return "\n".join(lines)
+
+
+def _entry_key(bibtex: str) -> str:
+    """Key of the first entry in a BibTeX chunk."""
+    match = re.search(r"@\w+\{([^,]+),", bibtex)
+    return match.group(1) if match else "unknown"
 
 
 def fetch_crossref(doi: str) -> Optional[Dict[str, Any]]:
@@ -157,7 +162,6 @@ def bibtex_from_crossref(meta: Dict[str, Any]) -> str:
         if meta[field]:
             lines.append(f"  {field:<9} = {{{meta[field]}}},")
     lines.append(f"  doi       = {{{meta['doi']}}},")
-    lines.append(f"  % VERIFIED: https://api.crossref.org/works/{meta['doi']}")
     lines.append("}")
     return "\n".join(lines)
 
@@ -193,6 +197,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--search", nargs="*", default=[], help="arXiv search queries")
     parser.add_argument("--ids-file", default=None, help="file with one arXiv identifier per line")
     parser.add_argument("--out", default=None, help="write the BibTeX here instead of stdout")
+    parser.add_argument("--sources", default=None, help="write the provenance table here")
     args = parser.parse_args(argv)
 
     identifiers = list(args.ids)
@@ -202,6 +207,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     chunks: List[str] = []
     failures: List[str] = []
+    sources: Dict[str, str] = {}
 
     for arxiv_id in identifiers:
         try:
@@ -212,7 +218,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if meta is None:
             failures.append(f"{arxiv_id}: not resolved by the arXiv API")
             continue
-        chunks.append(bibtex_from_arxiv(meta))
+        entry = bibtex_from_arxiv(meta)
+        chunks.append(entry)
+        sources[_entry_key(entry)] = str(meta.get("abs_url", arxiv_id))
 
     for doi in args.dois:
         try:
@@ -223,7 +231,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if meta is None:
             failures.append(f"{doi}: not resolved by Crossref")
             continue
-        chunks.append(bibtex_from_crossref(meta))
+        entry = bibtex_from_crossref(meta)
+        chunks.append(entry)
+        sources[_entry_key(entry)] = str(meta.get("url", doi))
 
     for query in args.search:
         try:
@@ -244,7 +254,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.out:
         with open(args.out, "w", encoding="utf-8") as handle:
             handle.write(output + "\n")
-        print(f"wrote {args.out} ({len(chunks)} entries, {len(failures)} unresolved)", file=sys.stderr)
+        directory = args.out[: args.out.rfind("/") + 1]
+        sources_path = args.sources or directory + "refs_sources.md"
+        header = (
+            "# Bibliography provenance\n\n"
+            "Every entry in `refs.bib` was resolved against the public record below with\n"
+            "`scripts/verify_references.py`. The mapping lives here and not inside the\n"
+            "BibTeX file, because BibTeX parses a percent sign inside an entry as a field\n"
+            'and fails with "You are missing a field name".\n\n'
+            "| Key | Source |\n|---|---|\n"
+        )
+        rows = "".join(f"| `{key}` | {url} |\n" for key, url in sorted(sources.items()))
+        with open(sources_path, "w", encoding="utf-8") as handle:
+            handle.write(header + rows)
+        print(
+            f"wrote {args.out} ({len(chunks)} entries, {len(failures)} unresolved) "
+            f"and {sources_path}",
+            file=sys.stderr,
+        )
     else:
         print(output)
     return 0 if chunks else 1
