@@ -30,6 +30,15 @@ sweep:
   seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   init_scale: 0.5
 
+# Slow-loop endpoint. The headline results use open weights served on the MSI
+# (see docs/local-serving.md). The exact tag and quantization are recorded with
+# every run and pinned in the manuscript.
+llm:
+  base_url: http://127.0.0.1:11434/v1
+  model: qwen3.5:4b
+  cache: results/llm_cache.jsonl
+  replay: false
+
 # Drifting-objective block (E2): the objective changes mid-run with no warning.
 drift:
   segments: 3

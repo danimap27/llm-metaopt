@@ -30,7 +30,8 @@ import yaml
 
 from . import vqe
 from .labeler import NO_OP, Intervention, default_candidates, label_state
-from .llm_client import LLMConfig, decide as llm_decide
+from .llm_cache import ResponseCache
+from .llm_client import LLMConfig, decide as llm_decide, decide_cached
 from .optimizer import SPSAConfig, apply_intervention, spsa_step
 from .policy import LogisticPolicy
 from .regimes import RegimeConfig
@@ -128,6 +129,7 @@ def run_closed_loop(
     candidates: Optional[Sequence[Intervention]] = None,
     llm_cfg: Optional[LLMConfig] = None,
     llm_session: Optional[Any] = None,
+    cache: Optional[Any] = None,
     policy: Optional[LogisticPolicy] = None,
 ) -> Dict[str, Any]:
     """Run one closed-loop trajectory and return its metrics."""
@@ -164,7 +166,11 @@ def run_closed_loop(
                 if llm_cfg is None:
                     action = NO_OP
                 else:
-                    response = llm_decide(window, llm_cfg, session=llm_session)
+                    response = (
+                        decide_cached(window, llm_cfg, cache)
+                        if cache is not None
+                        else llm_decide(window, llm_cfg, session=llm_session)
+                    )
                     n_llm_calls += 1
                     if response.get("ok"):
                         llm_latency_total += float(response["latency_s"])
@@ -182,7 +188,16 @@ def run_closed_loop(
                         }
                     else:
                         llm_failures += 1
+                        llm_latency_total += sum(
+                            float(attempt.get("latency_s") or 0.0)
+                            for attempt in response.get("attempts", [])
+                        )
                         action = NO_OP
+                        info["llm_failed"] = True
+                        info["llm_error"] = [
+                            {"error": attempt.get("error"), "variant": attempt.get("used_json_schema")}
+                            for attempt in response.get("attempts", [])
+                        ]
             else:
                 action = NO_OP
 
@@ -276,8 +291,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out", default="results/experiment.jsonl")
     parser.add_argument("--conditions", default=",".join(CONDITIONS))
     parser.add_argument("--policy", default=None, help="path to a trained policy JSON (needed for spsa_policy)")
-    parser.add_argument("--llm-base-url", default="http://localhost:11434/v1")
-    parser.add_argument("--llm-model", default="qwen3.5:4b")
+    parser.add_argument("--llm-base-url", default=None)
+    parser.add_argument("--llm-model", default=None)
+    parser.add_argument("--llm-timeout", type=float, default=None)
+    parser.add_argument("--llm-max-tokens", type=int, default=None)
+    parser.add_argument("--llm-no-think", action="store_true", help="force the /no_think hint")
+    parser.add_argument("--cache", default=None, help="response cache path (enables replay)")
+    parser.add_argument("--replay", action="store_true", help="serve every call from the cache")
     parser.add_argument("--mock-llm", action="store_true", help="use the heuristic controller instead of the LLM (offline smoke test)")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
@@ -302,9 +322,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_path = pathlib.Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     policy = LogisticPolicy.load(args.policy) if args.policy else None
-    llm_cfg = LLMConfig(base_url=args.llm_base_url, model=args.llm_model)
+    llm_defaults = cfg.get("llm", {}) or {}
+    llm_base_url = args.llm_base_url or llm_defaults.get("base_url", "http://127.0.0.1:11434/v1")
+    llm_model = args.llm_model or llm_defaults.get("model", "qwen3.5:4b")
+    cache_path = args.cache if args.cache is not None else llm_defaults.get("cache")
+    replay = bool(args.replay or llm_defaults.get("replay", False))
+    cache = ResponseCache(cache_path, replay_only=replay) if cache_path else None
+    llm_timeout = args.llm_timeout or float(llm_defaults.get("timeout", 120.0))
+    llm_max_tokens = args.llm_max_tokens or int(llm_defaults.get("max_tokens", 400))
+    llm_cfg = LLMConfig(
+        base_url=llm_base_url,
+        model=llm_model,
+        timeout=llm_timeout,
+        max_tokens=llm_max_tokens,
+        no_think=bool(args.llm_no_think or llm_defaults.get("no_think", False)),
+        extra_body=dict(llm_defaults.get("extra_body", {}) or {}),
+    )
     if "spsa_llm" in conditions:
-        print(f"[experiment] LLM endpoint: {llm_cfg.base_url} model={llm_cfg.model}")
+        print(
+            f"[experiment] LLM endpoint: {llm_cfg.base_url} model={llm_cfg.model} "
+            f"cache={cache_path} replay={replay}"
+        )
 
     spsa_cfg = SPSAConfig(**cfg["spsa"])
     regime_cfg = RegimeConfig(**cfg["regimes"])
@@ -333,6 +371,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 init_scale=run["init_scale"],
                 lookahead=lookahead,
                 llm_cfg=llm_cfg,
+                cache=cache,
                 policy=policy,
             )
             record = {"kind": "run", **{k: v for k, v in run.items() if k != "run_id"}, **result}
@@ -343,6 +382,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "n_window": n_window,
                 "lookahead": lookahead,
                 "llm": llm_cfg.to_dict() if run["condition"] == "spsa_llm" else None,
+                "cache": cache_path if run["condition"] == "spsa_llm" else None,
+                "replay": replay if run["condition"] == "spsa_llm" else None,
                 "mock_llm": bool(args.mock_llm),
             }
             handle.write(json.dumps(_clean_nan(record), ensure_ascii=False) + "\n")
@@ -511,6 +552,10 @@ def run_drift_loop(
                 else:
                     llm_failures += 1
                     info["llm_failed"] = True
+                    info["llm_error"] = [
+                        {"error": attempt.get("error"), "variant": attempt.get("used_json_schema")}
+                        for attempt in response.get("attempts", [])
+                    ]
 
             changed = action != NO_OP
             theta_snapshot = theta.copy()

@@ -221,13 +221,31 @@ def test_llm_payload_and_decision_parsing():
     assert decision["expected_effect"] == pytest.approx(0.05)
 
 
-def test_llm_parse_decision_requires_the_expected_effect():
+def test_llm_parse_decision_tolerates_a_missing_expected_effect():
     raw = (
         '{"diagnosis": "MINIMO_LOCAL", "justification": "flat", '
         '"action": {"eta_scale": 1.0, "noise_sigma": 0.0, "restart": false}}'
     )
-    with pytest.raises(ValueError):
-        parse_decision(raw)
+    decision = parse_decision(raw)
+    assert decision["expected_effect"] is None
+    assert decision["diagnosis"] == "MINIMO_LOCAL"
+
+
+def test_llm_payload_supports_the_json_object_fallback():
+    window = {"n_window": 10, "improvement": 0.0, "grad_norm": {"last": 1e-5}}
+    cfg = LLMConfig(base_url="http://localhost:11434/v1", model="qwen3.5:4b")
+    payload = build_request_payload(window, cfg, use_json_schema="json_object")
+    assert payload["response_format"] == {"type": "json_object"}
+
+
+def test_llm_messages_can_disable_thinking():
+    from code.llm_client import build_messages
+
+    window = {"n_window": 10, "improvement": 0.0}
+    quiet = build_messages(window, LLMConfig(base_url="http://x/v1", model="m", no_think=True))
+    loud = build_messages(window, LLMConfig(base_url="http://x/v1", model="m"))
+    assert quiet[1]["content"].endswith("/no_think")
+    assert not loud[1]["content"].endswith("/no_think")
 
 
 def test_llm_parse_decision_handles_garbage():

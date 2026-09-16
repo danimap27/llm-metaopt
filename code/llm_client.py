@@ -79,6 +79,7 @@ class LLMConfig:
     temperature: float = 0.0
     seed: int = 0
     max_tokens: int = 400
+    no_think: bool = False
     timeout: float = 120.0
     use_json_schema: bool = True
     extra_body: Dict[str, Any] = field(default_factory=dict)
@@ -87,11 +88,19 @@ class LLMConfig:
         return asdict(self)
 
 
-def build_messages(window: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Prompt messages: system prompt plus the serialized telemetry window."""
+def build_messages(window: Dict[str, Any], cfg: Optional[LLMConfig] = None) -> List[Dict[str, str]]:
+    """Prompt messages: system prompt plus the serialized telemetry window.
+
+    With ``cfg.no_think`` the user turn carries the ``/no_think`` hint that
+    several open-weights families understand, which turns a classifier into a
+    single forward pass instead of a long chain of thought.
+    """
+    content = json.dumps(window, ensure_ascii=False, sort_keys=True)
+    if cfg is not None and cfg.no_think:
+        content = content + " /no_think"
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(window, ensure_ascii=False, sort_keys=True)},
+        {"role": "user", "content": content},
     ]
 
 
@@ -104,14 +113,16 @@ def build_request_payload(
     schema = cfg.use_json_schema if use_json_schema is None else use_json_schema
     payload: Dict[str, Any] = {
         "model": cfg.model,
-        "messages": build_messages(window),
+        "messages": build_messages(window, cfg),
         "temperature": cfg.temperature,
         "seed": cfg.seed,
         "max_tokens": cfg.max_tokens,
         "stream": False,
     }
-    if schema:
+    if schema is True:
         payload["response_format"] = {"type": "json_schema", "json_schema": DECISION_SCHEMA}
+    elif schema == "json_object":
+        payload["response_format"] = {"type": "json_object"}
     payload.update(cfg.extra_body)
     return payload
 
@@ -126,7 +137,7 @@ def parse_decision(text: str) -> Dict[str, Any]:
     if match is None:
         raise ValueError(f"no JSON object found in the response: {text[:200]!r}")
     decision = json.loads(match.group(0))
-    for key in ("diagnosis", "justification", "action", "expected_effect"):
+    for key in ("diagnosis", "justification", "action"):
         if key not in decision:
             raise ValueError(f"missing field {key!r} in the decision")
     action = decision["action"]
@@ -138,7 +149,8 @@ def parse_decision(text: str) -> Dict[str, Any]:
     decision["action"]["eta_scale"] = float(action["eta_scale"])
     decision["action"]["noise_sigma"] = float(action["noise_sigma"])
     decision["action"]["restart"] = bool(action["restart"])
-    decision["expected_effect"] = float(decision["expected_effect"])
+    raw_effect = decision.get("expected_effect")
+    decision["expected_effect"] = float(raw_effect) if isinstance(raw_effect, (int, float)) else None
     return decision
 
 
@@ -160,7 +172,7 @@ def decide(
         headers["Authorization"] = f"Bearer {cfg.api_key}"
 
     attempts: List[Dict[str, Any]] = []
-    variants = [True, False] if cfg.use_json_schema else [False]
+    variants = [True, "json_object", False] if cfg.use_json_schema else [False]
     for use_schema in variants:
         payload = build_request_payload(window, cfg, use_json_schema=use_schema)
         started = time.perf_counter()
@@ -169,7 +181,13 @@ def decide(
             latency = time.perf_counter() - started
             response.raise_for_status()
             data = response.json()
-            raw = data["choices"][0]["message"]["content"]
+            message = data["choices"][0].get("message", {})
+            raw = message.get("content") or ""
+            if not raw.strip() and (message.get("reasoning") or message.get("reasoning_content")):
+                raise ValueError(
+                    "empty content: the endpoint returned only reasoning. "
+                    "Disable thinking (no_think) or raise max_tokens."
+                )
             decision = parse_decision(raw)
             return {
                 "ok": True,

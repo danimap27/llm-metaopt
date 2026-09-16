@@ -75,8 +75,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     out_path = pathlib.Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    cache = ResponseCache(args.cache, replay_only=args.replay) if args.cache else None
-    llm_cfg = LLMConfig(base_url=args.llm_base_url, model=args.llm_model) if "drift_llm" in conditions else None
+    llm_defaults = cfg.get("llm", {}) or {}
+    cache_path = args.cache if args.cache is not None else llm_defaults.get("cache")
+    replay = bool(args.replay or llm_defaults.get("replay", False))
+    cache = ResponseCache(cache_path, replay_only=replay) if cache_path else None
+    llm_cfg = (
+        LLMConfig(
+            base_url=args.llm_base_url or llm_defaults.get("base_url", "http://127.0.0.1:11434/v1"),
+            model=args.llm_model if args.llm_model != "qwen3.5:4b" else llm_defaults.get("model", args.llm_model),
+        )
+        if "drift_llm" in conditions
+        else None
+    )
     spsa_cfg = SPSAConfig(**cfg["spsa"])
     n_window = int(cfg["windows"]["n_window"])
     tol_ok = float(cfg["regimes"]["tol_ok"])
@@ -117,7 +127,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "safeguard_epsilon": safeguard_epsilon,
                     "spsa": spsa_cfg.to_dict(),
                     "llm": llm_cfg.to_dict() if llm_cfg is not None else None,
-                    "cache": args.cache,
+                    "cache": cache_path,
                     "mock_llm": bool(args.mock_llm),
                 },
                 **result,
