@@ -34,8 +34,24 @@ remain paired.
 
 ## Design
 
-- Problems: Heisenberg, TFIM and XY Hamiltonians with 2 to 4 qubits.
+- Problems: Heisenberg, TFIM and XY Hamiltonians with 2, 4, 8 and 16 qubits,
+  scaling the barren-plateau regime that the controller claims to address.
 - Noise levels: `p = 0`, `0.02` and `0.05` depolarizing per gate.
+- Evaluation backends, selected by qubit count and recorded per run:
+  | n | p = 0 | p > 0 |
+  |---|---|---|
+  | 2 to 8 | `statevector_exact` | `density_matrix_exact` |
+  | 16 | `statevector_exact` | `statevector_kraus_exact` |
+  All three give exact expectation values under their models. The density
+  matrix needs 4**n amplitudes (256 MB at 8 qubits, about 68 GB at 16), so
+  noisy 16-qubit problems run on the statevector backend, which averages the
+  Kraus branches of the noise model exactly. Shot noise is not simulated in
+  these blocks, it enters in the hardware block with its finite shot budget.
+- Measured cost on the reference machine (2 layers, one energy evaluation):
+  16 qubits without noise is 0.1 s, so a 120-step run is about 24 s; 16 qubits
+  with noise is about 5.6 s per evaluation, so a noisy run is about 22 min.
+  The noiseless block runs on the homelab, the noisy 16-qubit block is
+  sharded on Hercules or the dual-GPU node.
 - Seeds: at least 20 per cell, giving 180 or more paired runs per condition.
 - `N_w` sweep: 5, 10 and 20 fast-loop steps, to separate the effect of the
   controller from the effect of the call frequency.

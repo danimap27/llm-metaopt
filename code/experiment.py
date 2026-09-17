@@ -376,7 +376,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 cache=cache,
                 policy=policy,
             )
-            record = {"kind": "run", **{k: v for k, v in run.items() if k != "run_id"}, **result}
+            record = {
+                "kind": "run",
+                **{k: v for k, v in run.items() if k != "run_id"},
+                "backend": vqe.energy_backend(run["n_qubits"], run["noise_p"]),
+                **result,
+            }
             record["run_id"] = run["run_id"]
             record["meta"] = {
                 "e_min": e_min,

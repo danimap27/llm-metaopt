@@ -13,7 +13,7 @@ Conventions
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -21,6 +21,7 @@ from qiskit.circuit import ParameterVector
 from qiskit.quantum_info import SparsePauliOp, Statevector
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel, depolarizing_error
+from scipy.sparse.linalg import eigsh
 
 ArrayLike = Union[np.ndarray, Sequence[float]]
 
@@ -143,8 +144,18 @@ def parameter_count(n_qubits: int, n_layers: int) -> int:
 # --------------------------------------------------------------------------- #
 
 def exact_ground_energy(hamiltonian: SparsePauliOp) -> float:
-    """Exact minimum by dense diagonalization (small qubit counts only)."""
-    return float(np.linalg.eigvalsh(hamiltonian.to_matrix())[0])
+    """Exact minimum of the Hamiltonian.
+
+    A dense diagonalization is used up to six qubits. Above that, a sparse
+    Lanczos solver (``scipy.sparse.linalg.eigsh``) keeps the calculation
+    feasible in memory, which is what allows the 16-qubit runs of the paper.
+    """
+    n = hamiltonian.num_qubits
+    if n <= 6:
+        return float(np.linalg.eigvalsh(hamiltonian.to_matrix())[0])
+    sparse_op = hamiltonian.to_matrix(sparse=True)
+    eigenvalues = eigsh(sparse_op, k=1, which="SA", return_eigenvectors=False, tol=1e-10)
+    return float(eigenvalues[0])
 
 
 def depolarizing_noise_model(p: float) -> NoiseModel:
@@ -155,6 +166,31 @@ def depolarizing_noise_model(p: float) -> NoiseModel:
     return model
 
 
+#: Largest qubit count evaluated with the exact density-matrix method. The
+#: density matrix stores 4**n complex amplitudes (16 B each), which is 256 MB at
+#: eight qubits and about 68 GB at sixteen. Noisy problems above this budget
+#: use the statevector backend instead, which averages the Kraus branches of
+#: the noise model exactly because expectation values are linear in the state.
+#: The result is the exact noisy expectation with 2**n memory instead of 4**n.
+MAX_DENSITY_QUBITS = 8
+
+
+def energy_backend(n_qubits: int, noise_p: float) -> str:
+    """Name of the evaluation backend selected for a problem.
+
+    The name is recorded in the run metadata so that every reported number
+    carries the evaluation method it was produced with. All three backends
+    give exact expectation values under their respective models. Shot noise
+    is not simulated in these blocks, it enters in the hardware block where
+    the estimator uses a finite shot budget.
+    """
+    if noise_p <= 0.0:
+        return "statevector_exact"
+    if n_qubits <= MAX_DENSITY_QUBITS:
+        return "density_matrix_exact"
+    return "statevector_kraus_exact"
+
+
 def make_energy_fn(
     hamiltonian: SparsePauliOp,
     n_qubits: int,
@@ -163,9 +199,13 @@ def make_energy_fn(
 ) -> Callable[[ArrayLike], float]:
     """Return E(theta) = <psi(theta)|H|psi(theta)>.
 
-    With ``noise_p == 0`` the statevector simulator is used. With noise, the
-    expectation value is computed on ``AerSimulator`` under the depolarizing
-    model, which is exact for the density-matrix method.
+    Without noise the statevector simulator is used, which stays exact up to
+    and beyond sixteen qubits (0.1 s per evaluation at 16 qubits on the
+    reference machine). With noise, problems up to ``MAX_DENSITY_QUBITS`` use
+    the density-matrix method. Larger noisy problems use the statevector
+    backend with the same noise model, where Aer averages the Kraus branches
+    of each noisy gate exactly. Both noisy backends give the exact value of
+    the expectation under the depolarizing model, with no sampling error.
     """
     circuit, params = build_ansatz(n_qubits, n_layers)
     wires = list(range(n_qubits))
@@ -178,15 +218,26 @@ def make_energy_fn(
 
         return energy
 
-    backend = AerSimulator(noise_model=depolarizing_noise_model(noise_p))
+    if n_qubits <= MAX_DENSITY_QUBITS:
+        backend = AerSimulator(noise_model=depolarizing_noise_model(noise_p))
 
-    def energy_noisy(theta: ArrayLike) -> float:
+        def energy_noisy(theta: ArrayLike) -> float:
+            bound = circuit.assign_parameters(dict(zip(params, np.asarray(theta, dtype=float)))).copy()
+            bound.save_expectation_value(hamiltonian, wires)  # type: ignore[attr-defined]
+            result = backend.run(bound).result()
+            return float(np.real(result.data(0)["expectation_value"]))
+
+        return energy_noisy
+
+    backend = AerSimulator(method="statevector", noise_model=depolarizing_noise_model(noise_p))
+
+    def energy_noisy_kraus(theta: ArrayLike) -> float:
         bound = circuit.assign_parameters(dict(zip(params, np.asarray(theta, dtype=float)))).copy()
         bound.save_expectation_value(hamiltonian, wires)  # type: ignore[attr-defined]
         result = backend.run(bound).result()
         return float(np.real(result.data(0)["expectation_value"]))
 
-    return energy_noisy
+    return energy_noisy_kraus
 
 
 def parameter_shift_gradient(

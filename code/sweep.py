@@ -119,6 +119,7 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
         "seed": run["seed"],
         "init_scale": run["init_scale"],
         "e_min": e_min,
+        "backend": vqe.energy_backend(n_qubits, run["noise_p"]),
         "spsa": spsa_cfg.to_dict(),
         "n_window": n_window,
     }
