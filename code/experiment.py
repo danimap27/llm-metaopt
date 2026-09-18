@@ -21,6 +21,8 @@ import argparse
 import json
 import math
 import pathlib
+import queue
+import threading
 import time
 from itertools import product
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -44,7 +46,9 @@ CONDITIONS: Tuple[str, ...] = (
     "spsa_heuristic",
     "spsa_oracle",
     "spsa_policy",
+    "spsa_effect",
     "spsa_llm",
+    "spsa_llm_async",
 )
 
 _SLOW_LOOP_CONDITIONS = {
@@ -54,7 +58,37 @@ _SLOW_LOOP_CONDITIONS = {
     "spsa_policy",
     "spsa_effect",
     "spsa_llm",
+    "spsa_llm_async",
 }
+
+# The response cache appends to a shared JSONL file, so cached calls from
+# in-flight async threads are serialized.
+_CACHE_LOCK = threading.Lock()
+
+
+def _llm_call_sync(
+    window: Dict[str, Any],
+    llm_cfg: "LLMConfig",
+    cache: Optional[Any],
+    llm_session: Optional[Any],
+) -> Dict[str, Any]:
+    if cache is not None:
+        with _CACHE_LOCK:
+            return decide_cached(window, llm_cfg, cache)
+    return llm_decide(window, llm_cfg, session=llm_session)
+
+
+def _async_llm_call(
+    window: Dict[str, Any],
+    llm_cfg: "LLMConfig",
+    cache: Optional[Any],
+    llm_session: Optional[Any],
+    out: "queue.Queue",
+) -> None:
+    try:
+        out.put(_llm_call_sync(window, llm_cfg, cache, llm_session))
+    except Exception as exc:  # defensive: the drain expects a response always
+        out.put({"ok": False, "attempts": [{"error": str(exc), "latency_s": 0.0}]})
 
 
 # --------------------------------------------------------------------------- #
@@ -147,6 +181,7 @@ def run_closed_loop(
     cache: Optional[Any] = None,
     policy: Optional[LogisticPolicy] = None,
     safeguard_epsilon: float = 0.05,
+    async_drain_timeout_s: float = 5.0,
 ) -> Dict[str, Any]:
     """Run one closed-loop trajectory and return its metrics."""
     candidates = list(default_candidates() if candidates is None else candidates)
@@ -166,6 +201,59 @@ def run_closed_loop(
     started = time.perf_counter()
     # Index into ``events`` of an intervention whose safeguard window is open.
     pending: Optional[int] = None
+    # Asynchronous slow-loop calls in flight, waiting for their response.
+    pending_async: List[Dict[str, Any]] = []
+
+    def _apply_async(slot: Dict[str, Any], response: Dict[str, Any], at_step: int) -> None:
+        nonlocal theta, eta_scale, n_changes, llm_latency_total, llm_failures, pending
+        event = events[slot["event_index"]]
+        if response.get("ok"):
+            llm_latency_total += float(response["latency_s"])
+            payload = response["decision"]
+            raw_eta = payload["action"]["eta_scale"]
+            action = Intervention(
+                eta_scale=None if raw_eta is None else float(raw_eta),
+                noise_sigma=float(payload["action"]["noise_sigma"]),
+                restart=bool(payload["action"]["restart"]),
+            )
+            event.update(
+                {
+                    "diagnosis": payload["diagnosis"],
+                    "justification": payload["justification"],
+                    "expected_effect": payload["expected_effect"],
+                    "latency_s": response["latency_s"],
+                    "n_attempts": response.get("n_attempts"),
+                }
+            )
+        else:
+            llm_failures += 1
+            llm_latency_total += sum(
+                float(attempt.get("latency_s") or 0.0) for attempt in response.get("attempts", [])
+            )
+            action = NO_OP
+            event["llm_failed"] = True
+        event["staleness_steps"] = at_step - int(slot["step"])
+        event["applied_step"] = at_step
+        event["applied"] = True
+        event["action"] = action.to_dict()
+        event["is_noop"] = action == NO_OP
+        if action.eta_scale is not None:
+            eta_scale = float(action.eta_scale)
+        event["eta_scale"] = eta_scale
+        if action != NO_OP:
+            n_changes += 1
+            snapshot = theta.copy()
+            theta = apply_intervention(
+                theta,
+                eta_scale=1.0,
+                noise_sigma=float(action.noise_sigma),
+                restart=bool(action.restart),
+                rng=ctrl_rng,
+                init_scale=init_scale,
+            )
+            event["theta_snapshot"] = snapshot.tolist()
+            pending = slot["event_index"]
+
     for k in range(steps):
         # Safeguard window close: revert an intervention whose window ended with
         # a worse gap than at the decision point. Applies uniformly to every
@@ -181,6 +269,16 @@ def run_closed_loop(
                 eta_scale = float(event["eta_before"])
                 event["reverted"] = True
             pending = None
+        # Drain completed asynchronous calls and apply their action to the
+        # current state, recording the staleness of the window they advise.
+        for slot in list(pending_async):
+            try:
+                response = slot["queue"].get_nowait()
+            except queue.Empty:
+                continue
+            pending_async.remove(slot)
+            _apply_async(slot, response, k)
+
         if condition in _SLOW_LOOP_CONDITIONS and k > 0 and k % n_window == 0 and history:
             window = build_window(history, len(history) - 1, n_window, eta_scale=eta_scale, theta=theta)
             # Reference for the XAI audit: the energy immediately before the
@@ -203,15 +301,29 @@ def run_closed_loop(
                         f"condition {condition!r} requires a trained policy; run code/train_policy.py first"
                     )
                 action = policy.predict(window)
+            elif condition == "spsa_llm_async":
+                if llm_cfg is None:
+                    action = NO_OP
+                else:
+                    # Fire the request and keep optimizing. The action is
+                    # applied when the response lands (see the drain below),
+                    # to the state that exists then, and the event records
+                    # the staleness in fast-loop steps.
+                    slot: Dict[str, Any] = {"step": k, "queue": queue.Queue()}
+                    threading.Thread(
+                        target=_async_llm_call,
+                        args=(window, llm_cfg, cache, llm_session, slot["queue"]),
+                        daemon=True,
+                    ).start()
+                    n_llm_calls += 1
+                    pending_async.append(slot)
+                    action = NO_OP
+                    info = {"async_pending": True}
             elif condition == "spsa_llm":
                 if llm_cfg is None:
                     action = NO_OP
                 else:
-                    response = (
-                        decide_cached(window, llm_cfg, cache)
-                        if cache is not None
-                        else llm_decide(window, llm_cfg, session=llm_session)
-                    )
+                    response = _llm_call_sync(window, llm_cfg, cache, llm_session)
                     n_llm_calls += 1
                     if response.get("ok"):
                         llm_latency_total += float(response["latency_s"])
@@ -278,17 +390,41 @@ def run_closed_loop(
                 }
             )
             pending = len(events) - 1
+            if condition == "spsa_llm_async" and pending_async and "event_index" not in pending_async[-1]:
+                pending_async[-1]["event_index"] = len(events) - 1
 
         theta, record = spsa_step(energy_fn, theta, spsa_cfg, k, fast_rng, eta_scale)
         history.append(record)
         if steps_to_threshold is None and abs(float(record["energy"]) - e_min) <= threshold:
             steps_to_threshold = k
 
+    # Drain whatever is still in flight at the end of the run. Responses
+    # that do not arrive within the grace period count as unapplied.
+    n_async_unapplied = 0
+    for slot in list(pending_async):
+        event = events[slot["event_index"]]
+        try:
+            response = slot["queue"].get(timeout=async_drain_timeout_s)
+        except queue.Empty:
+            event["applied"] = False
+            event["unapplied"] = True
+            n_async_unapplied += 1
+            continue
+        pending_async.remove(slot)
+        _apply_async(slot, response, steps)
+
     final_energy = float(energy_fn(theta))
     wall_s = time.perf_counter() - started
+    staleness = [float(e["staleness_steps"]) for e in events if e.get("applied")]
     return {
         "condition": condition,
         "final_energy": final_energy,
+        "n_async_unapplied": n_async_unapplied,
+        "staleness_mean_steps": (sum(staleness) / len(staleness)) if staleness else None,
+        # Mean wall time of one fast-loop step, excluding the credited slow-loop
+        # latency. Clamped: cached or mocked calls can credit more latency than
+        # the run actually spent waiting.
+        "fast_step_wall_s": max((wall_s - llm_latency_total) / max(steps, 1), 1e-9),
         "final_gap": abs(final_energy - e_min),
         "best_gap": min(abs(float(r["energy"]) - e_min) for r in history),
         "steps_to_threshold": steps_to_threshold,
@@ -366,7 +502,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Offline mode: the heuristic controller stands in for the LLM so the
         # pipeline can be exercised without an endpoint. Results carry
         # mock_llm=true and must never be reported as LLM results.
-        conditions = ["spsa_heuristic" if item == "spsa_llm" else item for item in conditions]
+        conditions = [
+            "spsa_heuristic" if item in ("spsa_llm", "spsa_llm_async") else item for item in conditions
+        ]
         # Mock substitution can collide with an explicit spsa_heuristic entry;
         # keep one run per condition so run_ids stay unique.
         conditions = list(dict.fromkeys(conditions))
