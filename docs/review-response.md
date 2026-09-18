@@ -1,9 +1,10 @@
 # Response to the adversarial code review
 
 Reviewed commit: `ab9eb07b6828376c6825c74a70a113165c79faf0`
-Response commits: `38fb7ac (measurement layer), 12a342b (fair controller
-measurement), 9604b0f (baselines), fd3130e (analysis layer), 31ac856 (manuscript), plus this
-document. Verdicts below describe the repository after the fixes.
+Response commits: `38fb7ac` (measurement layer), `12a342b` (fair controller
+measurement), `9604b0f` (baselines), `fd3130e` (analysis layer), `31ac856`
+(manuscript), plus this document. Verdicts below describe the repository
+after the fixes.
 
 ## Blockers
 
