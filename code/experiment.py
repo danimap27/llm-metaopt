@@ -32,7 +32,7 @@ from . import vqe
 from .labeler import NO_OP, Intervention, default_candidates, label_state
 from .llm_cache import ResponseCache
 from .llm_client import LLMConfig, decide as llm_decide, decide_cached
-from .optimizer import SPSAConfig, apply_intervention, spsa_step
+from .optimizer import SPSAConfig, apply_intervention, counting_energy_fn, spsa_step
 from .policy import LogisticPolicy
 from .regimes import RegimeConfig
 from .telemetry import build_window
@@ -356,7 +356,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for index, run in enumerate(runs, start=1):
             hamiltonian = vqe.build_hamiltonian(run["hamiltonian"], run["n_qubits"])
             e_min = vqe.exact_ground_energy(hamiltonian)
-            energy_fn = vqe.make_energy_fn(hamiltonian, run["n_qubits"], run["n_layers"], noise_p=run["noise_p"])
+            shots = int(cfg["sweep"].get("shots", vqe.DEFAULT_TRAJECTORY_SHOTS))
+            energy_fn, eval_counter = counting_energy_fn(
+                vqe.make_energy_fn(hamiltonian, run["n_qubits"], run["n_layers"], noise_p=run["noise_p"], shots=shots)
+            )
             theta0 = vqe.random_initial_theta(
                 np.random.default_rng(run["seed"]), run["n_qubits"], run["n_layers"], scale=run["init_scale"]
             )
@@ -380,6 +383,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "kind": "run",
                 **{k: v for k, v in run.items() if k != "run_id"},
                 "backend": vqe.energy_backend(run["n_qubits"], run["noise_p"]),
+                "n_energy_evals": eval_counter["n"],
                 **result,
             }
             record["run_id"] = run["run_id"]

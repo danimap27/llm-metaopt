@@ -25,7 +25,7 @@ import yaml
 
 from . import vqe
 from .labeler import label_state
-from .optimizer import SPSAConfig, run_spsa
+from .optimizer import SPSAConfig, counting_energy_fn, run_spsa
 from .regimes import RegimeConfig, diagnose, directional_gradient_variance
 from .telemetry import build_window
 
@@ -94,7 +94,10 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
     n_layers = run["n_layers"]
     hamiltonian = vqe.build_hamiltonian(run["hamiltonian"], n_qubits)
     e_min = vqe.exact_ground_energy(hamiltonian)
-    energy_fn = vqe.make_energy_fn(hamiltonian, n_qubits, n_layers, noise_p=run["noise_p"])
+    shots = int(cfg["sweep"].get("shots", vqe.DEFAULT_TRAJECTORY_SHOTS))
+    energy_fn, eval_counter = counting_energy_fn(
+        vqe.make_energy_fn(hamiltonian, n_qubits, n_layers, noise_p=run["noise_p"], shots=shots)
+    )
 
     rng = np.random.default_rng(run["seed"])
     theta0 = vqe.random_initial_theta(rng, n_qubits, n_layers, scale=run["init_scale"])
@@ -120,6 +123,8 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
         "init_scale": run["init_scale"],
         "e_min": e_min,
         "backend": vqe.energy_backend(n_qubits, run["noise_p"]),
+        "shots": shots if vqe.energy_backend(n_qubits, run["noise_p"]) == "statevector_trajectory" else None,
+        "n_energy_evals": eval_counter["n"],
         "spsa": spsa_cfg.to_dict(),
         "n_window": n_window,
     }

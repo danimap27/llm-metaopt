@@ -167,28 +167,29 @@ def depolarizing_noise_model(p: float) -> NoiseModel:
 
 
 #: Largest qubit count evaluated with the exact density-matrix method. The
-#: density matrix stores 4**n complex amplitudes (16 B each), which is 256 MB at
-#: eight qubits and about 68 GB at sixteen. Noisy problems above this budget
-#: use the statevector backend instead, which averages the Kraus branches of
-#: the noise model exactly because expectation values are linear in the state.
-#: The result is the exact noisy expectation with 2**n memory instead of 4**n.
-MAX_DENSITY_QUBITS = 8
+#: density matrix stores 4**n complex amplitudes (16 B each): about 1 MB at 8
+#: qubits, 268 MB at 12 qubits and about 1 GB at 13. Noisy problems above this
+#: budget use sampled quantum trajectories on the statevector backend, which
+#: carry a Monte Carlo error of order 1/sqrt(shots) that must be reported with
+#: any number produced by that backend.
+MAX_DENSITY_QUBITS = 12
+DEFAULT_TRAJECTORY_SHOTS = 1024
 
 
 def energy_backend(n_qubits: int, noise_p: float) -> str:
     """Name of the evaluation backend selected for a problem.
 
     The name is recorded in the run metadata so that every reported number
-    carries the evaluation method it was produced with. All three backends
-    give exact expectation values under their respective models. Shot noise
-    is not simulated in these blocks, it enters in the hardware block where
-    the estimator uses a finite shot budget.
+    carries the evaluation method it was produced with. ``statevector_exact``
+    and ``density_matrix_exact`` are exact. ``statevector_trajectory``
+    introduces sampling noise of order 1/sqrt(shots) and is only used where
+    the density matrix does not fit in memory.
     """
     if noise_p <= 0.0:
         return "statevector_exact"
     if n_qubits <= MAX_DENSITY_QUBITS:
         return "density_matrix_exact"
-    return "statevector_kraus_exact"
+    return "statevector_trajectory"
 
 
 def make_energy_fn(
@@ -196,21 +197,28 @@ def make_energy_fn(
     n_qubits: int,
     n_layers: int,
     noise_p: float = 0.0,
+    shots: int = DEFAULT_TRAJECTORY_SHOTS,
+    backend_override: Optional[str] = None,
 ) -> Callable[[ArrayLike], float]:
     """Return E(theta) = <psi(theta)|H|psi(theta)>.
 
     Without noise the statevector simulator is used, which stays exact up to
-    and beyond sixteen qubits (0.1 s per evaluation at 16 qubits on the
-    reference machine). With noise, problems up to ``MAX_DENSITY_QUBITS`` use
-    the density-matrix method. Larger noisy problems use the statevector
-    backend with the same noise model, where Aer averages the Kraus branches
-    of each noisy gate exactly. Both noisy backends give the exact value of
-    the expectation under the depolarizing model, with no sampling error.
+    and beyond sixteen qubits. With noise, problems up to
+    ``MAX_DENSITY_QUBITS`` use the explicit density-matrix method, which is
+    exact under the noise model. Larger noisy problems use the statevector
+    backend with sampled quantum trajectories: the depolarizing noise is real,
+    the result is a Monte Carlo estimate whose error is of order
+    1/sqrt(shots), and ``shots`` is recorded next to every run that uses it.
+
+    ``backend_override`` forces a backend ("statevector_exact",
+    "density_matrix_exact" or "statevector_trajectory") and exists so tests
+    can compare the backends at qubit counts where both are feasible.
     """
     circuit, params = build_ansatz(n_qubits, n_layers)
     wires = list(range(n_qubits))
+    selected = backend_override if backend_override is not None else energy_backend(n_qubits, noise_p)
 
-    if noise_p <= 0.0:
+    if noise_p <= 0.0 or selected == "statevector_exact":
 
         def energy(theta: ArrayLike) -> float:
             bound = circuit.assign_parameters(dict(zip(params, np.asarray(theta, dtype=float))))
@@ -218,8 +226,8 @@ def make_energy_fn(
 
         return energy
 
-    if n_qubits <= MAX_DENSITY_QUBITS:
-        backend = AerSimulator(noise_model=depolarizing_noise_model(noise_p))
+    if selected == "density_matrix_exact":
+        backend = AerSimulator(method="density_matrix", noise_model=depolarizing_noise_model(noise_p))
 
         def energy_noisy(theta: ArrayLike) -> float:
             bound = circuit.assign_parameters(dict(zip(params, np.asarray(theta, dtype=float)))).copy()
@@ -231,13 +239,13 @@ def make_energy_fn(
 
     backend = AerSimulator(method="statevector", noise_model=depolarizing_noise_model(noise_p))
 
-    def energy_noisy_kraus(theta: ArrayLike) -> float:
+    def energy_noisy_trajectory(theta: ArrayLike) -> float:
         bound = circuit.assign_parameters(dict(zip(params, np.asarray(theta, dtype=float)))).copy()
         bound.save_expectation_value(hamiltonian, wires)  # type: ignore[attr-defined]
-        result = backend.run(bound).result()
+        result = backend.run(bound, shots=shots).result()
         return float(np.real(result.data(0)["expectation_value"]))
 
-    return energy_noisy_kraus
+    return energy_noisy_trajectory
 
 
 def parameter_shift_gradient(

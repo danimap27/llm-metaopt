@@ -64,15 +64,39 @@ def spsa_step(
     e_minus = float(energy_fn(theta - c_k * delta))
     g_hat = (e_plus - e_minus) / (2.0 * c_k) * delta
     theta_next = theta - a_k * g_hat
+    # Record the true energy of the new iterate, not the midpoint proxy
+    # 0.5 * (e_plus + e_minus), whose O(c_k^2) bias decays with the schedule
+    # and can fake progress. This costs one extra evaluation per step, which
+    # the evaluation counter records.
+    energy_true = float(energy_fn(theta_next))
     record: Dict[str, object] = {
         "step": k,
-        "energy": 0.5 * (e_plus + e_minus),
+        "energy": energy_true,
         "grad_norm": float(np.linalg.norm(g_hat)),
         "a_k": a_k,
         "c_k": c_k,
         "theta": theta_next.tolist(),
     }
     return theta_next, record
+
+
+def counting_energy_fn(
+    energy_fn: Callable[[ArrayLike], float],
+) -> Tuple[Callable[[ArrayLike], float], Dict[str, int]]:
+    """Wrap an energy function with an evaluation counter.
+
+    The counter is the quantum budget of a run. Conditions that simulate
+    extra trajectories (the oracle and the counterfactual labeling) increase
+    it, and every reported table must be reproducible at matched budget, so
+    the count is recorded per run.
+    """
+    counter = {"n": 0}
+
+    def wrapped(theta: ArrayLike) -> float:
+        counter["n"] += 1
+        return energy_fn(theta)
+
+    return wrapped, counter
 
 
 def run_spsa(

@@ -31,19 +31,20 @@ def test_heisenberg_reference_values() -> None:
 def test_backend_selection() -> None:
     assert vqe.energy_backend(2, 0.0) == "statevector_exact"
     assert vqe.energy_backend(16, 0.0) == "statevector_exact"
-    assert vqe.energy_backend(8, 0.05) == "density_matrix_exact"
-    assert vqe.energy_backend(9, 0.05) == "statevector_kraus_exact"
-    assert vqe.energy_backend(16, 0.02) == "statevector_kraus_exact"
+    assert vqe.energy_backend(12, 0.05) == "density_matrix_exact"
+    assert vqe.energy_backend(13, 0.05) == "statevector_trajectory"
+    assert vqe.energy_backend(16, 0.02) == "statevector_trajectory"
 
 
-@pytest.mark.parametrize("n", [4, 6])
-def test_kraus_backend_is_exact(n: int) -> None:
-    """The statevector Kraus path must match the density matrix bit for bit."""
+@pytest.mark.parametrize("n", [6, 8])
+def test_trajectory_backend_approaches_density_matrix(n: int) -> None:
+    """The trajectory backend is a Monte Carlo estimate of the same quantity."""
     hamiltonian = vqe.heisenberg_hamiltonian(n)
     theta = vqe.random_initial_theta(np.random.default_rng(3), n, 2)
     exact = vqe.make_energy_fn(hamiltonian, n, 2, noise_p=0.05)(theta)
-    kraus = vqe.make_energy_fn(hamiltonian, n, 2, noise_p=0.05)(theta)
-    assert kraus == pytest.approx(exact, abs=1e-10)
+    trajectory = vqe.make_energy_fn(hamiltonian, n, 2, noise_p=0.05, shots=20000,
+                                    backend_override="statevector_trajectory")(theta)
+    assert trajectory == pytest.approx(exact, abs=0.02)
 
 
 def test_parameter_count_scales() -> None:
