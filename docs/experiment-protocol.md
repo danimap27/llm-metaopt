@@ -24,8 +24,17 @@ advance and cannot be tuned to the results.
 | `spsa_random` | uniform random action from the grid | Controls for "any perturbation helps" |
 | `spsa_heuristic` | deterministic rules on the telemetry | Interpretable, zero-cost controller |
 | `spsa_policy` | multinomial logistic regression on the telemetry | Classical learning control |
-| `spsa_oracle` | best counterfactual action (simulator) | Upper bound, not deployable |
-| `spsa_llm` | LLM with the JSON telemetry window | The proposed method |
+| `spsa_effect` | per-action ridge models of the counterfactual effect | Offline contextual bandit, the natural classical model class for choose-one-of-k from a telemetry vector |
+| `spsa_oracle` | best counterfactual action (simulator) | Upper bound, not deployable; spends about 13x the quantum budget, recorded per run |
+| `spsa_llm` | LLM with the JSON telemetry window | The proposed method, synchronous: the fast loop is blocked during the call |
+| `spsa_llm_async` | same, but the fast loop keeps running | The action is applied to the state that exists when the response lands; each event records `staleness_steps`. Together with `spsa_llm` it measures the sync-versus-async trade-off that the cost-benefit claim rests on |
+
+All classical controllers and the LLM see exactly the same flattened
+telemetry window and choose from exactly the same seven-point action grid
+(`eta_scale` in {0.5, 1.0, 2.0 or keep}, `noise_sigma` in {0.0, 0.05, 0.15},
+optional restart). An intervention whose safeguard window closes with a worse
+gap than at the decision point is reverted for every condition alike, and
+each run records `n_reverted` and `n_energy_evals`.
 
 Every condition shares the seed, the initial angles and the Rademacher
 perturbation stream of the fast loop. Controllers draw from a separate RNG

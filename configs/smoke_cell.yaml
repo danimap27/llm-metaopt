@@ -1,0 +1,47 @@
+# First complete cell of the closed-loop benchmark (smoke run, 2026-09-18).
+# Heisenberg, 4 qubits, depolarizing p = 0.02, seeds 0-7.
+# The LLM arms are run separately once the 2x3090 serving node is reachable;
+# this cell covers every classical condition including the oracle ceiling and
+# the effect-ridge policy trained on configs/smoke_train.yaml.
+
+ansatz:
+  n_layers: 2
+
+spsa:
+  steps: 120
+  a: 0.25
+  c: 0.1
+  alpha: 0.602
+  gamma: 0.101
+  A: 10.0
+
+windows:
+  n_window: 10
+  lookahead: 10
+  max_labels_per_run: 4
+  label_repeats: 3
+
+safeguard_epsilon: 0.05
+
+regimes:
+  tol_ok: 0.05
+  eps_bp: 0.0001      # relative to ||H||^2 (sum |coeffs|)^2
+  min_improvement: 0.001
+  eps_grad_local: 0.005
+  n_directions: 6
+
+sweep:
+  hamiltonians: [heisenberg]
+  n_qubits: [4]
+  noise_p: [0.02]
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+  init_scale: 0.5
+  shots: 1024
+
+llm:
+  base_url: http://127.0.0.1:11434
+  model: qwen3.5:4b
+  api_style: ollama
+  no_think: true
+  cache: results/llm_cache.jsonl
+  replay: false
