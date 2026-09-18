@@ -31,7 +31,12 @@ DRIFT_BASELINE_CONDITION = "drift_spsa"
 
 
 def load_results(path: str | pathlib.Path) -> List[Dict[str, Any]]:
-    records: List[Dict[str, Any]] = []
+    """Run records deduplicated by run_id, keeping the last occurrence.
+
+    Re-running a partially completed sweep appends new attempts, and the last
+    completed record for a run_id is the authoritative one.
+    """
+    by_id: Dict[str, Dict[str, Any]] = {}
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -39,8 +44,8 @@ def load_results(path: str | pathlib.Path) -> List[Dict[str, Any]]:
                 continue
             record = json.loads(line)
             if record.get("kind") == "run":
-                records.append(record)
-    return records
+                by_id[str(record.get("run_id"))] = record
+    return list(by_id.values())
 
 
 def load_drift_records(path: str | pathlib.Path) -> List[Dict[str, Any]]:
@@ -97,6 +102,14 @@ def summarize(records: Sequence[Dict[str, Any]], seed: int = 0) -> Dict[str, Any
     for condition, condition_records in sorted(grouped.items()):
         gaps = [float(record["final_gap"]) for record in condition_records]
         stats = bootstrap_ci(gaps, seed=seed)
+        # Review finding M2: report the gap relative to the exact minimum so the
+        # mean is not dominated by the largest instances in the sweep.
+        relative = [
+            float(record["final_gap"]) / max(abs(float(record.get("meta", {}).get("e_min", 0.0))), 1e-12)
+            for record in condition_records
+            if record.get("meta", {}).get("e_min") is not None
+        ]
+        rel_stats = bootstrap_ci(np.asarray(relative), seed=seed) if relative else None
         successes = [1.0 if record.get("steps_to_threshold") is not None else 0.0 for record in condition_records]
         interventions = [float(record["n_interventions"]) for record in condition_records]
         latencies = [
@@ -111,6 +124,9 @@ def summarize(records: Sequence[Dict[str, Any]], seed: int = 0) -> Dict[str, Any
             "gap_std": float(stats["std"]),
             "gap_ci_low": float(stats["ci_low"]),
             "gap_ci_high": float(stats["ci_high"]),
+            "relative_gap_mean": float(rel_stats["mean"]) if rel_stats else None,
+            "relative_gap_ci_low": float(rel_stats["ci_low"]) if rel_stats else None,
+            "relative_gap_ci_high": float(rel_stats["ci_high"]) if rel_stats else None,
             "success_rate": float(sum(successes) / len(successes)) if successes else 0.0,
             "interventions_mean": float(sum(interventions) / len(interventions)) if interventions else 0.0,
             "llm_latency_mean_s": float(sum(latencies) / len(latencies)) if latencies else None,
@@ -132,7 +148,42 @@ def summarize(records: Sequence[Dict[str, Any]], seed: int = 0) -> Dict[str, Any
         for row, corrected in zip(pending_rows, holm_bonferroni(pending_p)):
             row["p_adjusted"] = float(corrected["p_adjusted"])
 
-    return {"conditions": rows, "n_runs": len(records), "baseline": BASELINE_CONDITION}
+    return {
+        "conditions": rows,
+        "n_runs": len(records),
+        "baseline": BASELINE_CONDITION,
+        # The declared multiple-comparison family: one test per non-baseline
+        # condition against spsa, pooled across the sweep cells.
+        "holm_family": [row["condition"] for row in pending_rows],
+    }
+
+
+def summarize_by_cell(records: Sequence[Dict[str, Any]], seed: int = 0) -> Dict[str, Any]:
+    """Per-cell summaries over (hamiltonian, n_qubits, noise_p).
+
+    Review finding M2: pooling raw gaps across 2- and 16-qubit problems makes
+    the pooled mean uninterpretable, so the paper reports each cell separately
+    and the pooled table only with the relative gap.
+    """
+    cells: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        key = (
+            record.get("hamiltonian", "unknown"),
+            int(record.get("n_qubits", 0)),
+            float(record.get("noise_p", 0.0)),
+        )
+        cells[key].append(record)
+    summaries = []
+    for key in sorted(cells, key=lambda item: (str(item[0]), item[1], item[2])):
+        cell_records = cells[key]
+        summary = summarize(cell_records, seed=seed)
+        summary["cell"] = {
+            "hamiltonian": key[0],
+            "n_qubits": key[1],
+            "noise_p": key[2],
+        }
+        summaries.append(summary)
+    return {"cells": summaries, "n_runs": len(records)}
 
 
 def to_markdown(summary: Dict[str, Any]) -> str:
@@ -293,11 +344,17 @@ def explanation_table(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Pair the expected effect of every language-model call with the observed effect.
 
     The expected effect is what the model stated it wanted to achieve over the
-    next window. The observed effect is the actual gap reduction over that same
-    window, taken from the energy curve and the exact minimum of the run.
+    next window. The observed effect is the gap reduction over that same window
+    measured from the energy at the decision point (``energy_pre``, captured
+    immediately before the intervention), not from the post-intervention point,
+    so a restart cannot start the measurement from a degraded state (review
+    finding M3). Events with a missing expected effect are counted as dropped
+    and reported, not silently skipped.
     """
     predicted: List[float] = []
     observed: List[float] = []
+    n_dropped = 0
+    n_events = 0
     for record in records:
         if record.get("condition") != "spsa_llm":
             continue
@@ -307,29 +364,45 @@ def explanation_table(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         e_min = float(record.get("meta", {}).get("e_min", 0.0))
         n_window = int(record.get("meta", {}).get("n_window", 10))
         for event in record.get("events", []):
+            n_events += 1
             expected = event.get("expected_effect")
             if not isinstance(expected, (int, float)):
+                n_dropped += 1
                 continue
             start = int(event["step"])
             end = min(start + n_window, len(energies) - 1)
             if start >= len(energies) or end <= start:
+                n_dropped += 1
                 continue
+            energy_pre = event.get("energy_pre")
+            if isinstance(energy_pre, (int, float)):
+                reference = float(energy_pre)
+            else:
+                reference = energies[start]
             predicted.append(float(expected))
-            observed.append((energies[start] - e_min) - (energies[end] - e_min))
+            observed.append((reference - e_min) - (energies[end] - e_min))
     if not predicted:
-        return {"n": 0}
-    return explanation_report(predicted, observed)
+        return {"n": 0, "n_dropped": n_dropped, "n_events": n_events}
+    report = explanation_report(predicted, observed)
+    report["n_dropped"] = n_dropped
+    report["n_events"] = n_events
+    return report
 
 
 def explanation_markdown(report: Dict[str, Any]) -> str:
     """Single-table report of the explanation-fidelity metrics."""
     if report.get("n", 0) == 0:
         return "No language-model events were scored.\n"
+    pearson = report["pearson_r"]
+    pearson_text = "undefined" if pearson is None else f"{pearson:.3f}"
     return (
         "| Metric | Value |\n|---|---|\n"
         f'| Calls scored | {report["n"]} |\n'
+        f'| Events dropped (missing expected effect or window) | {report.get("n_dropped", 0)} |\n'
         f'| Signed accuracy | {report["signed_accuracy"]:.3f} |\n'
-        f'| Pearson r | {report["pearson_r"]:.3f} |\n'
+        f'| Majority-sign null accuracy | {report.get("majority_sign_accuracy", float("nan")):.3f} |\n'
+        f'| Signed accuracy permutation p | {report.get("signed_accuracy_perm_p", float("nan")):.4f} |\n'
+        f'| Pearson r | {pearson_text} |\n'
         f'| Mean absolute error (energy units) | {report["mae"]:.4f} |\n'
         f'| Mean predicted effect | {report["mean_predicted"]:.4f} |\n'
         f'| Mean observed effect | {report["mean_observed"]:.4f} |\n'
@@ -353,6 +426,8 @@ def write_csv(path: pathlib.Path, records: Sequence[Dict[str, Any]]) -> None:
         "n_changes",
         "n_llm_calls",
         "llm_latency_mean_s",
+        "n_energy_evals",
+        "n_reverted",
         "wall_s",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -384,6 +459,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         (out_dir / "summary.tex").write_text(to_latex(summary), encoding="utf-8")
         write_csv(out_dir / "per_run.csv", records)
         print(to_markdown(summary))
+
+        cell_summary = summarize_by_cell(records, seed=args.seed)
+        (out_dir / "summary_by_cell.json").write_text(
+            json.dumps(cell_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        print(f"[aggregate] wrote per-cell summaries for {len(cell_summary['cells'])} cells")
 
         explanation = explanation_table(records)
         (out_dir / "explanation.md").write_text(explanation_markdown(explanation), encoding="utf-8")

@@ -42,6 +42,8 @@ SCALAR_FIELDS = (
     "theta.mean_abs",
     "theta.max_abs",
     "theta.dim",
+    "progress.drop_from_start",
+    "progress.gap_above_best_so_far",
 )
 
 

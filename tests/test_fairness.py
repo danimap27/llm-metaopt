@@ -67,6 +67,7 @@ def _synthetic_window() -> dict:
         "grad_norm": {"last": 0.0, "mean": 0.0, "max": 0.0},
         "eta": {"a_k_last": 0.0, "c_k_last": 0.0, "eta_scale": 1.0},
         "theta": {"var": 0.0, "mean_abs": 0.0, "max_abs": 0.0, "dim": 12},
+        "progress": {"drop_from_start": 0.0, "gap_above_best_so_far": 0.0},
     }
 
 

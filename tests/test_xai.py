@@ -58,7 +58,12 @@ def test_explanation_report_rejects_mismatched_lengths():
         explanation_report([], [])
 
 
-def test_explanation_report_handles_a_constant_predictor_without_nan():
+def test_explanation_report_marks_an_undefined_correlation_as_none() -> None:
     report = explanation_report([1.0, 1.0, 1.0], [-1.0, 2.0, 3.0])
-    assert report["pearson_r"] == 0.0
+    # A constant predictor makes Pearson correlation undefined: report None,
+    # not zero, so the table cannot be misread as "no linear relationship".
+    assert report["pearson_r"] is None
     assert not np.isnan(report["mae"])
+    # The null models exist and are computed.
+    assert 0.0 <= report["majority_sign_accuracy"] <= 1.0
+    assert 0.0 < report["signed_accuracy_perm_p"] <= 1.0

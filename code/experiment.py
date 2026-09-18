@@ -35,7 +35,7 @@ from .llm_cache import ResponseCache
 from .llm_client import LLMConfig, decide as llm_decide, decide_cached
 from .optimizer import SPSAConfig, apply_intervention, counting_energy_fn, spsa_step
 from .policy import LogisticPolicy, load_policy
-from .regimes import RegimeConfig
+from .regimes import REGIMES, RegimeConfig
 from .telemetry import build_window
 
 CONDITIONS: Tuple[str, ...] = (
@@ -270,6 +270,9 @@ def run_closed_loop(
                     "eta_before": eta_before,
                     "energy_pre": energy_pre,
                     "theta_snapshot": None if is_noop else theta_snapshot.tolist(),
+                    # The raw window is stored for LLM runs so the occlusion
+                    # battery in code.analysis can replay each call field by field.
+                    "window": window if condition == "spsa_llm" else None,
                     "is_noop": is_noop,
                     **info,
                 }
@@ -364,6 +367,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # pipeline can be exercised without an endpoint. Results carry
         # mock_llm=true and must never be reported as LLM results.
         conditions = ["spsa_heuristic" if item == "spsa_llm" else item for item in conditions]
+        # Mock substitution can collide with an explicit spsa_heuristic entry;
+        # keep one run per condition so run_ids stay unique.
+        conditions = list(dict.fromkeys(conditions))
         print("[experiment] mock LLM enabled: spsa_llm runs use the heuristic controller")
     runs = build_runs(cfg, conditions)
     if args.limit > 0:
@@ -392,6 +398,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         api_style=str(args.llm_api_style or llm_defaults.get("api_style", "openai")),
         no_think=bool(args.llm_no_think or llm_defaults.get("no_think", False)),
         extra_body=dict(llm_defaults.get("extra_body", {}) or {}),
+        # Static objective: the model is not offered CONCEPT_DRIFT, which it
+        # could never identify from a static-run window (review finding M4).
+        regimes=tuple(name for name in REGIMES if name != "CONCEPT_DRIFT"),
     )
     if "spsa_llm" in conditions:
         print(

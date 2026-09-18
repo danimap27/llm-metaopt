@@ -35,10 +35,15 @@ REGIMES: Tuple[str, ...] = (
 
 @dataclass
 class RegimeConfig:
-    """Diagnosis thresholds (ablated in the paper)."""
+    """Diagnosis thresholds (ablated in the paper).
+
+    ``eps_bp`` is relative: the directional-gradient variance is normalized by
+    the squared norm bound of the Hamiltonian, so the same threshold is
+    comparable across qubit counts (review finding M5).
+    """
 
     tol_ok: float = 0.05
-    eps_bp: float = 1e-3
+    eps_bp: float = 1e-4
     min_improvement: float = 1e-3
     eps_grad_local: float = 5e-3
     n_directions: int = 8
@@ -82,21 +87,34 @@ def diagnose(
     grad_norm_last: float,
     grad_var: float,
     cfg: RegimeConfig | None = None,
+    h_norm: float = 1.0,
 ) -> Dict[str, object]:
-    """Regime label plus the reasons, from telemetry and ground truth."""
+    """Regime label plus the reasons, from telemetry and ground truth.
+
+    ``h_norm`` is an upper bound on the spectral norm of the Hamiltonian
+    (the sum of the absolute Pauli coefficients). The directional-gradient
+    variance is normalized by ``h_norm**2`` so ``eps_bp`` is dimensionless and
+    comparable across problem sizes.
+    """
     cfg = RegimeConfig() if cfg is None else cfg
     gap = float(energy - e_min)
+    scale = max(float(h_norm) ** 2, 1e-30)
+    grad_var_rel = float(grad_var) / scale
     details: Dict[str, object] = {
         "gap": gap,
         "window_improvement": float(window_improvement),
         "grad_norm_last": float(grad_norm_last),
         "grad_var": float(grad_var),
+        "grad_var_rel": grad_var_rel,
+        "h_norm": float(h_norm),
     }
 
     if abs(gap) <= cfg.tol_ok:
         label, reason = "CONVERGENCIA_OK", f"|E - E_min| = {abs(gap):.4f} <= tol_ok = {cfg.tol_ok}"
-    elif grad_var <= cfg.eps_bp:
-        label, reason = "BARREN_PLATEAU", f"Var[directional] = {grad_var:.2e} <= eps_bp = {cfg.eps_bp:.1e}"
+    elif grad_var_rel <= cfg.eps_bp:
+        label, reason = "BARREN_PLATEAU", (
+            f"relative Var[directional] = {grad_var_rel:.2e} <= eps_bp = {cfg.eps_bp:.1e}"
+        )
     elif window_improvement <= cfg.min_improvement and abs(grad_norm_last) <= cfg.eps_grad_local:
         label, reason = "MINIMO_LOCAL", (
             f"window improvement {window_improvement:.2e} <= {cfg.min_improvement:.1e} "

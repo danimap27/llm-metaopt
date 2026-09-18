@@ -55,7 +55,15 @@ DECISION_SCHEMA: Dict[str, Any] = {
     },
 }
 
-SYSTEM_PROMPT = """You are the slow-loop meta-optimizer supervising SPSA on a variational quantum algorithm.
+_REGIME_DESCRIPTIONS: Dict[str, str] = {
+    "CONVERGENCIA_OK": "the energy is at (or within tolerance of) the best reachable value",
+    "BARREN_PLATEAU": "gradients are vanishingly small in every direction, so progress stalls far from the optimum",
+    "MINIMO_LOCAL": "gradients are small and the window shows no improvement while the energy is still far from the optimum",
+    "MESETA_ENERGIA": "no improvement in the window with a non-negligible gradient (noisy or rough landscape)",
+    "CONCEPT_DRIFT": "the objective itself changed (time-series case only)",
+}
+
+_SYSTEM_TEMPLATE = """You are the slow-loop meta-optimizer supervising SPSA on a variational quantum algorithm.
 
 You receive a telemetry window of the last optimization steps and must decide one macroscopic intervention.
 
@@ -64,13 +72,10 @@ Telemetry fields:
 - grad_norm (last, mean, max): norm of the SPSA gradient estimate.
 - eta (a_k_last, c_k_last, eta_scale): learning-rate and perturbation schedules.
 - theta (var, mean_abs, max_abs, dim): dispersion of the variational angles in radians.
+- progress (drop_from_start, gap_above_best_so_far): dimensionless progress of the run since the beginning.
 
-Regimes:
-- CONVERGENCIA_OK: the energy is at (or within tolerance of) the best reachable value.
-- BARREN_PLATEAU: gradients are vanishingly small in every direction, so progress stalls far from the optimum.
-- MINIMO_LOCAL: gradients are small and the window shows no improvement while the energy is still far from the optimum.
-- MESETA_ENERGIA: no improvement in the window with a non-negligible gradient (noisy or rough landscape).
-- CONCEPT_DRIFT: the objective itself changed (time-series case only).
+Regimes (choose exactly one):
+{regimes}
 
 Interventions (choose one action):
 - eta_scale: one of 0.5, 1.0 or 2.0 as a multiplier on the SPSA step size, or null to keep the current multiplier unchanged.
@@ -79,6 +84,24 @@ Interventions (choose one action):
 - expected_effect: the gap reduction you expect from your action over the next window, in energy units (negative if you expect a worsening).
 
 Rules: answer with JSON only, follow the schema, keep justification under two sentences and ground it in the numbers you were given. Prefer the least invasive action that can restore progress."""
+
+
+def system_prompt(regimes: Sequence[str] = REGIMES) -> str:
+    """System prompt restricted to the regimes a given block can encounter."""
+    lines = "\n".join(f"- {name}: {_REGIME_DESCRIPTIONS[name]}." for name in regimes)
+    return _SYSTEM_TEMPLATE.format(regimes=lines)
+
+
+SYSTEM_PROMPT = system_prompt(REGIMES)
+
+
+def decision_schema(regimes: Sequence[str] = REGIMES) -> Dict[str, Any]:
+    """JSON schema restricted to the regimes a given block can encounter."""
+    import copy
+
+    schema = copy.deepcopy(DECISION_SCHEMA)
+    schema["schema"]["properties"]["diagnosis"]["enum"] = list(regimes)
+    return schema
 
 
 @dataclass
@@ -96,6 +119,10 @@ class LLMConfig:
     timeout: float = 120.0
     use_json_schema: bool = True
     extra_body: Dict[str, Any] = field(default_factory=dict)
+    # Regimes offered to the model. Static blocks exclude CONCEPT_DRIFT so the
+    # diagnosis is identifiable from the window (review finding M4); the drift
+    # block enables the full enum.
+    regimes: Sequence[str] = REGIMES
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -111,8 +138,9 @@ def build_messages(window: Dict[str, Any], cfg: Optional[LLMConfig] = None) -> L
     content = json.dumps(window, ensure_ascii=False, sort_keys=True)
     if cfg is not None and cfg.no_think:
         content = content + " /no_think"
+    prompt = system_prompt(cfg.regimes) if cfg is not None else SYSTEM_PROMPT
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": prompt},
         {"role": "user", "content": content},
     ]
 
@@ -151,7 +179,7 @@ def build_request_payload(
         if cfg.no_think:
             payload["think"] = False
         if schema is True:
-            payload["format"] = DECISION_SCHEMA["schema"]
+            payload["format"] = decision_schema(cfg.regimes)["schema"]
         elif schema == "json_object":
             payload["format"] = "json"
         payload.update(cfg.extra_body)
@@ -166,7 +194,7 @@ def build_request_payload(
         "stream": False,
     }
     if schema is True:
-        payload["response_format"] = {"type": "json_schema", "json_schema": DECISION_SCHEMA}
+        payload["response_format"] = {"type": "json_schema", "json_schema": decision_schema(cfg.regimes)}
     elif schema == "json_object":
         payload["response_format"] = {"type": "json_object"}
     payload.update(cfg.extra_body)

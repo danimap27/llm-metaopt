@@ -101,4 +101,15 @@ def build_window(
             "max_abs": compact_float(np.max(np.abs(theta_array))),
             "dim": int(theta_array.size),
         }
+    # Dimensionless progress proxies so a controller can tell "close to the
+    # best value seen" from "far from it" without knowing the exact minimum
+    # (review finding M4).
+    all_energies = [float(record["energy"]) for record in history[: end_index + 1]]
+    first_energy = all_energies[0] if all_energies else 0.0
+    best_so_far = min(all_energies) if all_energies else 0.0
+    last_energy = all_energies[-1] if all_energies else 0.0
+    window["progress"] = {
+        "drop_from_start": compact_float((first_energy - last_energy) / max(abs(first_energy), 1e-12)),
+        "gap_above_best_so_far": compact_float(last_energy - best_so_far),
+    }
     return window

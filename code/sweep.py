@@ -155,6 +155,7 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
             grad_norm_last=float(window["grad_norm"]["last"]),  # type: ignore[index]
             grad_var=grad_var,
             cfg=regime_cfg,
+            h_norm=float(np.sum(np.abs(hamiltonian.coeffs))),
         )
         record: Dict[str, Any] = {
             "kind": "window",

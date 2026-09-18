@@ -23,7 +23,7 @@ safeguard_epsilon: 0.05
 
 regimes:
   tol_ok: 0.05        # |E - E_min| below this counts as converged
-  eps_bp: 0.001       # directional-gradient variance below this counts as barren plateau
+  eps_bp: 0.0001      # barren-plateau threshold, relative to ||H||^2 (sum |coeffs|)^2
   min_improvement: 0.001
   eps_grad_local: 0.005
   n_directions: 6

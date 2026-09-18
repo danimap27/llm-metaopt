@@ -30,6 +30,7 @@ def _window(improvement: float = 0.0, grad_last: float = 1e-4) -> dict:
         "grad_norm": {"last": grad_last, "mean": grad_last, "max": grad_last},
         "eta": {"a_k_last": 0.1, "c_k_last": 0.05, "eta_scale": 1.0},
         "theta": {"var": 0.3, "mean_abs": 0.5, "max_abs": 1.0, "dim": 12},
+        "progress": {"drop_from_start": 0.2, "gap_above_best_so_far": 0.0},
     }
 
 

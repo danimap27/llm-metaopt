@@ -33,13 +33,21 @@ def occlusions(window: Dict[str, object]) -> Dict[str, Dict[str, object]]:
     return {field: drop_field(window, field) for field in FIDELITY_FIELDS if field in window}
 
 
-def explanation_report(predicted: Sequence[float], observed: Sequence[float]) -> Dict[str, float]:
+def explanation_report(
+    predicted: Sequence[float],
+    observed: Sequence[float],
+    n_perm: int = 2000,
+    seed: int = 0,
+) -> Dict[str, object]:
     """Agreement between the expected effect stated by the model and the measured effect.
 
     ``signed_accuracy`` is the fraction of calls whose stated direction was
-    right, ``pearson_r`` measures linear agreement and ``mae`` the magnitude of
-    the error. A constant predictor yields ``pearson_r = 0`` instead of a
-    not-a-number, because reviewers read these tables.
+    right. ``pearson_r`` measures linear agreement and is ``None`` (undefined,
+    not zero) when either side is constant. ``mae`` is the magnitude error.
+    ``majority_sign_accuracy`` is the base rate a constant sign predictor
+    achieves, and ``signed_accuracy_perm_p`` is the permutation p-value of the
+    signed accuracy under a random pairing, so the headline number is compared
+    against both nulls.
     """
     predicted_array = np.asarray(list(predicted), dtype=float)
     observed_array = np.asarray(list(observed), dtype=float)
@@ -48,15 +56,26 @@ def explanation_report(predicted: Sequence[float], observed: Sequence[float]) ->
     if predicted_array.size == 0:
         raise ValueError("no intervention events to score")
     signed = np.sign(predicted_array) == np.sign(observed_array)
+    accuracy = float(signed.mean())
     if predicted_array.size > 1 and predicted_array.std() > 0 and observed_array.std() > 0:
-        correlation = float(np.corrcoef(predicted_array, observed_array)[0, 1])
+        correlation: object = float(np.corrcoef(predicted_array, observed_array)[0, 1])
     else:
-        correlation = 0.0
+        correlation = None
+    rng = np.random.default_rng(seed)
+    perm_hits = 0
+    for _ in range(int(n_perm)):
+        shuffled = rng.permutation(observed_array)
+        if float(np.mean(np.sign(predicted_array) == np.sign(shuffled))) >= accuracy:
+            perm_hits += 1
+    p_perm = (perm_hits + 1) / (n_perm + 1)
+    majority = float(max(np.mean(observed_array > 0), np.mean(observed_array < 0)))
     return {
         "n": int(predicted_array.size),
-        "signed_accuracy": float(signed.mean()),
+        "signed_accuracy": accuracy,
         "pearson_r": correlation,
         "mae": float(np.mean(np.abs(predicted_array - observed_array))),
         "mean_predicted": float(predicted_array.mean()),
         "mean_observed": float(observed_array.mean()),
+        "majority_sign_accuracy": majority,
+        "signed_accuracy_perm_p": float(p_perm),
     }
