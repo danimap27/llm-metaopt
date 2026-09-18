@@ -48,6 +48,21 @@ make sweep              # small local dataset generation
 
 # One shard (HPC array jobs): 
 .venv/bin/python -m code.sweep --config configs/default.yaml --shard 0 --nshards 1
+
+# Closed loop with all controller conditions:
+.venv/bin/python -m code.experiment --config configs/default.yaml \
+    --policy models/policy_effect.json --out results/experiment.jsonl
+
+# Train the classical controllers on the sweep dataset (split by seed and family):
+.venv/bin/python -m code.train_policy --dataset data/sweep.jsonl --out-dir models
+
+# Paper tables, per-cell summaries, explanation fidelity:
+.venv/bin/python -m code.aggregate --results results/experiment.jsonl --out results/tables
+
+# Break-even surface (no endpoint needed) and the occlusion battery (needs one):
+.venv/bin/python -m code.analysis break-even --out results/tables/break_even.json
+.venv/bin/python -m code.analysis occlusions --results results/experiment.jsonl \
+    --endpoint-url http://<host>:11434 --out results/tables/occlusions.json
 ```
 
 ## Project rules
