@@ -117,7 +117,7 @@ def test_spsa_reduces_energy():
     theta0 = vqe.random_initial_theta(rng, 2, 2, scale=0.5)
     out = run_spsa(energy, theta0, cfg)
     assert out["final_energy"] < energy(theta0)
-    assert len(out["history"]) == cfg.steps + 1
+    assert len(out["history"]) == cfg.steps
     assert out["theta"].shape == theta0.shape
 
 

@@ -68,7 +68,7 @@ def test_detector_condition_restarts_after_the_boundary():
 
 
 def test_detector_restarts_respect_the_cooldown():
-    spec = _spec()
+    spec = _spec(steps=16)
     result = run_drift_loop(
         "drift_detector",
         DriftingObjective(spec),
@@ -77,7 +77,7 @@ def test_detector_restarts_respect_the_cooldown():
         n_window=4,
         threshold=0.05,
         seed=0,
-        detector_threshold=-1.0,  # alarms on every sample
+        detector_threshold=-1.0,  # alarms on every sample once past the warmup
     )
     alarms = [int(event["step"]) for event in result["events"] if event.get("alarm")]
     assert len(alarms) >= 2

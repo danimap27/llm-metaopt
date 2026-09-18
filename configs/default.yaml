@@ -17,6 +17,10 @@ windows:
   max_labels_per_run: 4
   label_repeats: 3    # rollouts per candidate in the counterfactual labeling
 
+# Uniform safeguard: an intervention whose window closes with a gap worse than
+# the decision point by more than this is reverted, for every condition alike.
+safeguard_epsilon: 0.05
+
 regimes:
   tol_ok: 0.05        # |E - E_min| below this counts as converged
   eps_bp: 0.001       # directional-gradient variance below this counts as barren plateau

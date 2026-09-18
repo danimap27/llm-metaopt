@@ -10,7 +10,7 @@ import pytest
 
 from code.aggregate import summarize, to_latex, to_markdown
 from code.labeler import Intervention, default_candidates
-from code.policy import FEATURE_NAMES, LogisticPolicy, MajorityPolicy, window_features
+from code.policy import SCALAR_FIELDS, LogisticPolicy, MajorityPolicy, window_features
 from code.stats import bootstrap_ci, cohens_d_paired, holm_bonferroni, paired_permutation_test
 
 
@@ -19,7 +19,14 @@ def _window(improvement: float = 0.0, grad_last: float = 1e-4) -> dict:
         "n_window": 10,
         "energy_series": [1.0, 0.9, 0.8],
         "improvement": improvement,
-        "energy": {"std": 0.05, "slope_per_step": -0.01},
+        "energy": {
+            "first": 1.0,
+            "last": 0.8,
+            "min": 0.8,
+            "mean": 0.9,
+            "std": 0.05,
+            "slope_per_step": -0.01,
+        },
         "grad_norm": {"last": grad_last, "mean": grad_last, "max": grad_last},
         "eta": {"a_k_last": 0.1, "c_k_last": 0.05, "eta_scale": 1.0},
         "theta": {"var": 0.3, "mean_abs": 0.5, "max_abs": 1.0, "dim": 12},
@@ -59,15 +66,17 @@ def test_cohens_dz_and_holm_correction():
 # --------------------------------------------------------------------------- #
 
 def test_window_features_length():
-    features = window_features(_window())
-    assert features.shape == (len(FEATURE_NAMES),)
+    window = _window()
+    features = window_features(window)
+    assert features.shape == (len(window["energy_series"]) + len(SCALAR_FIELDS),)
     assert np.all(np.isfinite(features))
 
 
 def test_logistic_policy_learns_a_separable_pattern():
     candidates = default_candidates()
     rng = np.random.default_rng(0)
-    X = np.vstack([np.full((20, len(FEATURE_NAMES)), -1.0), np.full((20, len(FEATURE_NAMES)), 1.0)])
+    dim = 3 + len(SCALAR_FIELDS)
+    X = np.vstack([np.full((20, dim), -1.0), np.full((20, dim), 1.0)])
     X += 0.05 * rng.standard_normal(X.shape)
     y = [0] * 20 + [3] * 20
     policy = LogisticPolicy(candidates=candidates).fit(X, y, epochs=400, seed=0)
@@ -79,8 +88,9 @@ def test_policy_roundtrip(tmp_path: pathlib.Path):
     candidates = default_candidates()
     policy = MajorityPolicy(candidates=candidates).fit([2, 2, 3])
     assert policy.predict(_window()) == candidates[2]
+    dim = 3 + len(SCALAR_FIELDS)
     trained = LogisticPolicy(candidates=candidates).fit(
-        np.vstack([np.zeros((5, len(FEATURE_NAMES))), np.ones((5, len(FEATURE_NAMES)))]), [1] * 5 + [2] * 5
+        np.vstack([np.zeros((5, dim)), np.ones((5, dim))]), [1] * 5 + [2] * 5
     )
     path = tmp_path / "policy.json"
     trained.save(path)

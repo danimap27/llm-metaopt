@@ -38,6 +38,16 @@ class Intervention:
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, payload: Dict[str, object]) -> "Intervention":
+        """Rebuild an action from :meth:`to_dict` output (policy store, records)."""
+        eta = payload.get("eta_scale")
+        return cls(
+            eta_scale=None if eta is None else float(eta),
+            noise_sigma=float(payload.get("noise_sigma", 0.0)),
+            restart=bool(payload.get("restart", False)),
+        )
+
     @property
     def name(self) -> str:
         base = "noop" if self.eta_scale is None else f"eta{self.eta_scale:g}"

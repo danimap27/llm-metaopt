@@ -132,16 +132,6 @@ def run_spsa(
             on_step(k_offset + i, record, theta)
 
     final_energy = float(energy_fn(theta))
-    history.append(
-        {
-            "step": n_steps,
-            "energy": final_energy,
-            "grad_norm": float("nan"),
-            "a_k": float("nan"),
-            "c_k": float("nan"),
-            "theta": theta.tolist(),
-        }
-    )
     return {"theta": theta, "history": history, "final_energy": final_energy}
 
 

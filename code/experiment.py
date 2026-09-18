@@ -28,12 +28,13 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import yaml
 
+from . import sweep as sweep_module
 from . import vqe
 from .labeler import NO_OP, Intervention, default_candidates, label_state
 from .llm_cache import ResponseCache
 from .llm_client import LLMConfig, decide as llm_decide, decide_cached
 from .optimizer import SPSAConfig, apply_intervention, counting_energy_fn, spsa_step
-from .policy import LogisticPolicy
+from .policy import LogisticPolicy, load_policy
 from .regimes import RegimeConfig
 from .telemetry import build_window
 
@@ -46,7 +47,14 @@ CONDITIONS: Tuple[str, ...] = (
     "spsa_llm",
 )
 
-_SLOW_LOOP_CONDITIONS = {"spsa_random", "spsa_heuristic", "spsa_oracle", "spsa_policy", "spsa_llm"}
+_SLOW_LOOP_CONDITIONS = {
+    "spsa_random",
+    "spsa_heuristic",
+    "spsa_oracle",
+    "spsa_policy",
+    "spsa_effect",
+    "spsa_llm",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +146,7 @@ def run_closed_loop(
     llm_session: Optional[Any] = None,
     cache: Optional[Any] = None,
     policy: Optional[LogisticPolicy] = None,
+    safeguard_epsilon: float = 0.05,
 ) -> Dict[str, Any]:
     """Run one closed-loop trajectory and return its metrics."""
     candidates = list(default_candidates() if candidates is None else candidates)
@@ -155,7 +164,23 @@ def run_closed_loop(
     llm_failures = 0
 
     started = time.perf_counter()
+    # Index into ``events`` of an intervention whose safeguard window is open.
+    pending: Optional[int] = None
     for k in range(steps):
+        # Safeguard window close: revert an intervention whose window ended with
+        # a worse gap than at the decision point. Applies uniformly to every
+        # controller condition, like in the drift block (review finding B3).
+        if pending is not None and k - int(events[pending]["step"]) >= n_window:
+            event = events[pending]
+            gap_now = abs(float(history[-1]["energy"]) - e_min)
+            if (
+                gap_now > abs(float(event["energy_pre"]) - e_min) + safeguard_epsilon
+                and event.get("theta_snapshot") is not None
+            ):
+                theta = np.asarray(event["theta_snapshot"], dtype=float)
+                eta_scale = float(event["eta_before"])
+                event["reverted"] = True
+            pending = None
         if condition in _SLOW_LOOP_CONDITIONS and k > 0 and k % n_window == 0 and history:
             window = build_window(history, len(history) - 1, n_window, eta_scale=eta_scale, theta=theta)
             # Reference for the XAI audit: the energy immediately before the
@@ -172,7 +197,11 @@ def run_closed_loop(
                 action, info = oracle_decision(
                     energy_fn, theta, spsa_cfg, e_min, ctrl_rng, lookahead, candidates, init_scale, k_offset=k
                 )
-            elif condition == "spsa_policy" and policy is not None:
+            elif condition in ("spsa_policy", "spsa_effect"):
+                if policy is None:
+                    raise ValueError(
+                        f"condition {condition!r} requires a trained policy; run code/train_policy.py first"
+                    )
                 action = policy.predict(window)
             elif condition == "spsa_llm":
                 if llm_cfg is None:
@@ -217,11 +246,13 @@ def run_closed_loop(
 
             # eta_scale None means "keep the current multiplier", so a no-op
             # or a failed call does not reset a previously granted change.
+            eta_before = eta_scale
             if action.eta_scale is not None:
                 eta_scale = float(action.eta_scale)
             is_noop = action == NO_OP
             if not is_noop:
                 n_changes += 1
+            theta_snapshot = theta.copy()
             theta = apply_intervention(
                 theta,
                 eta_scale=1.0,
@@ -236,11 +267,14 @@ def run_closed_loop(
                     "condition": condition,
                     "action": action.to_dict(),
                     "eta_scale": eta_scale,
+                    "eta_before": eta_before,
                     "energy_pre": energy_pre,
+                    "theta_snapshot": None if is_noop else theta_snapshot.tolist(),
                     "is_noop": is_noop,
                     **info,
                 }
             )
+            pending = len(events) - 1
 
         theta, record = spsa_step(energy_fn, theta, spsa_cfg, k, fast_rng, eta_scale)
         history.append(record)
@@ -257,6 +291,7 @@ def run_closed_loop(
         "steps_to_threshold": steps_to_threshold,
         "n_interventions": len(events),
         "n_changes": n_changes,
+        "n_reverted": sum(1 for event in events if event.get("reverted")),
         "n_llm_calls": n_llm_calls,
         "n_llm_failures": llm_failures,
         "llm_latency_total_s": llm_latency_total,
@@ -340,7 +375,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     out_path = pathlib.Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    policy = LogisticPolicy.load(args.policy) if args.policy else None
+    policy = load_policy(pathlib.Path(args.policy)) if args.policy else None
     llm_defaults = cfg.get("llm", {}) or {}
     llm_base_url = args.llm_base_url or llm_defaults.get("base_url", "http://127.0.0.1:11434/v1")
     llm_model = args.llm_model or llm_defaults.get("model", "qwen3.5:4b")
@@ -370,8 +405,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     n_window = int(cfg["windows"]["n_window"])
     lookahead = int(cfg["windows"]["lookahead"])
 
+    done_run_ids = sweep_module.read_done_run_ids(out_path)
     with out_path.open("a", encoding="utf-8") as handle:
         for index, run in enumerate(runs, start=1):
+            if run["run_id"] in done_run_ids:
+                print(f"[{index}/{len(runs)}] {run['run_id']}: already done, skipping")
+                continue
             hamiltonian = vqe.build_hamiltonian(run["hamiltonian"], run["n_qubits"])
             e_min = vqe.exact_ground_energy(hamiltonian)
             shots = int(cfg["sweep"].get("shots", vqe.DEFAULT_TRAJECTORY_SHOTS))
@@ -396,6 +435,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 llm_cfg=llm_cfg,
                 cache=cache,
                 policy=policy,
+                safeguard_epsilon=float(cfg.get("safeguard_epsilon", 0.05)),
             )
             record = {
                 "kind": "run",
