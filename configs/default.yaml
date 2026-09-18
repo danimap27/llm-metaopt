@@ -13,8 +13,9 @@ spsa:
 
 windows:
   n_window: 10        # N_w: fast-loop steps between slow-loop calls
-  lookahead: 20       # SPSA steps per candidate in the counterfactual labeling
+  lookahead: 10       # rollout horizon equals the in-force horizon of an action
   max_labels_per_run: 4
+  label_repeats: 3    # rollouts per candidate in the counterfactual labeling
 
 regimes:
   tol_ok: 0.05        # |E - E_min| below this counts as converged

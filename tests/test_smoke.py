@@ -188,7 +188,7 @@ def test_label_state_returns_valid_action():
         theta,
         cfg,
         e_min=-3.0,
-        seed=0,
+        rng=np.random.default_rng(12345),
         lookahead=10,
         candidates=[NO_OP, Intervention(eta_scale=2.0), Intervention(noise_sigma=0.1)],
     )
@@ -221,14 +221,16 @@ def test_llm_payload_and_decision_parsing():
     assert decision["expected_effect"] == pytest.approx(0.05)
 
 
-def test_llm_parse_decision_tolerates_a_missing_expected_effect():
+def test_llm_parse_decision_rejects_a_missing_expected_effect():
+    # The schema declares expected_effect required and parse enforces it, so a
+    # response that omits it must fail loudly instead of being silently dropped
+    # downstream (adversarial review, minor finding on llm_client).
     raw = (
         '{"diagnosis": "MINIMO_LOCAL", "justification": "flat", '
         '"action": {"eta_scale": 1.0, "noise_sigma": 0.0, "restart": false}}'
     )
-    decision = parse_decision(raw)
-    assert decision["expected_effect"] is None
-    assert decision["diagnosis"] == "MINIMO_LOCAL"
+    with pytest.raises(ValueError, match="expected_effect"):
+        parse_decision(raw)
 
 
 def test_llm_payload_supports_the_json_object_fallback():

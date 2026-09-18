@@ -129,13 +129,23 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
         "n_window": n_window,
     }
 
-    for end_index in range(n_window - 1, len(history) - 1, n_window):
+    # Label windows uniformly across the whole run, not just the first
+    # ones, and include converged states so that "do nothing" is learnable.
+    all_ends = list(range(n_window - 1, len(history) - 1, n_window))
+    if len(all_ends) > max_labels:
+        picks = np.linspace(0, len(all_ends) - 1, max_labels).round().astype(int)
+        label_ends = {all_ends[int(i)] for i in picks}
+    else:
+        label_ends = set(all_ends)
+    label_repeats = int(cfg["windows"].get("label_repeats", 3))
+
+    for end_index in all_ends:
         theta_k = np.asarray(history[end_index]["theta"], dtype=float)
         window = build_window(history, end_index, n_window, eta_scale=1.0, theta=theta_k)
         grad_var = directional_gradient_variance(
             energy_fn,
             theta_k,
-            np.random.default_rng(run["seed"] + end_index),
+            np.random.default_rng(np.random.SeedSequence([run["seed"], 555, end_index])),
             n_directions=regime_cfg.n_directions,
         )
         diagnosis = diagnose(
@@ -156,15 +166,18 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
             "window": window,
             "diagnosis": diagnosis,
         }
-        if diagnosis["label"] != "CONVERGENCIA_OK" and labels_written < max_labels:
+        if end_index in label_ends:
+            label_rng = np.random.default_rng(np.random.SeedSequence([run["seed"], 987_654, end_index]))
             record["label"] = label_state(
                 energy_fn,
                 theta_k,
                 spsa_cfg,
                 e_min=e_min,
-                seed=run["seed"] * 1000 + end_index,
+                rng=label_rng,
                 lookahead=lookahead,
                 init_scale=run["init_scale"],
+                k_offset=end_index,
+                n_repeats=label_repeats,
             )
             labels_written += 1
         _write(handle, record)

@@ -107,6 +107,8 @@ def run_spsa(
     steps: Optional[int] = None,
     seed: Optional[int] = None,
     on_step: Optional[Callable[[int, Dict[str, object], np.ndarray], None]] = None,
+    k_offset: int = 0,
+    rng: Optional[np.random.Generator] = None,
 ) -> Dict[str, object]:
     """Run SPSA from ``theta0``.
 
@@ -114,17 +116,20 @@ def run_spsa(
     and the final energy. ``seed`` fixes the Rademacher perturbation stream, so
     two runs with the same seed compare intervention candidates under identical
     measurement noise, which is what the counterfactual labeling needs.
+    ``k_offset`` continues the decay schedules at a global step so rollouts
+    reproduce the trajectory they advise, and ``rng`` lets the caller hand in
+    a derived generator instead of a seed.
     """
-    rng = np.random.default_rng(cfg.seed if seed is None else seed)
+    rng = np.random.default_rng(cfg.seed if seed is None else seed) if rng is None else rng
     theta = np.asarray(theta0, dtype=float).copy()
     n_steps = cfg.steps if steps is None else int(steps)
     history: List[Dict[str, object]] = []
 
-    for k in range(n_steps):
-        theta, record = spsa_step(energy_fn, theta, cfg, k, rng, eta_scale)
+    for i in range(n_steps):
+        theta, record = spsa_step(energy_fn, theta, cfg, k_offset + i, rng, eta_scale)
         history.append(record)
         if on_step is not None:
-            on_step(k, record, theta)
+            on_step(k_offset + i, record, theta)
 
     final_energy = float(energy_fn(theta))
     history.append(

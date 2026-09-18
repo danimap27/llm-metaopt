@@ -42,8 +42,8 @@ DECISION_SCHEMA: Dict[str, Any] = {
             "action": {
                 "type": "object",
                 "properties": {
-                    "eta_scale": {"type": "number", "minimum": 0.1, "maximum": 10.0},
-                    "noise_sigma": {"type": "number", "minimum": 0.0, "maximum": 0.5},
+                    "eta_scale": {"enum": [None, 0.5, 1.0, 2.0]},
+                    "noise_sigma": {"enum": [0.0, 0.05, 0.15]},
                     "restart": {"type": "boolean"},
                 },
                 "required": ["eta_scale", "noise_sigma", "restart"],
@@ -73,9 +73,9 @@ Regimes:
 - CONCEPT_DRIFT: the objective itself changed (time-series case only).
 
 Interventions (choose one action):
-- eta_scale: multiplier applied to the SPSA step size (0.1 to 10).
-- noise_sigma: standard deviation in radians of a Gaussian perturbation added to all angles (0 to 0.5); use it to break symmetries.
-- restart: full re-initialization of the angles.
+- eta_scale: one of 0.5, 1.0 or 2.0 as a multiplier on the SPSA step size, or null to keep the current multiplier unchanged.
+- noise_sigma: one of 0.0, 0.05 or 0.15, the standard deviation in radians of a one-shot Gaussian perturbation added to all angles; use it to break symmetries.
+- restart: full re-initialization of the angles. The action space is the same grid given to the classical controllers.
 - expected_effect: the gap reduction you expect from your action over the next window, in energy units (negative if you expect a worsening).
 
 Rules: answer with JSON only, follow the schema, keep justification under two sentences and ground it in the numbers you were given. Prefer the least invasive action that can restore progress."""
@@ -201,7 +201,7 @@ def parse_decision(text: str) -> Dict[str, Any]:
     if match is None:
         raise ValueError(f"no JSON object found in the response: {text[:200]!r}")
     decision = json.loads(match.group(0))
-    for key in ("diagnosis", "justification", "action"):
+    for key in ("diagnosis", "justification", "expected_effect", "action"):
         if key not in decision:
             raise ValueError(
                 f"missing field {key!r} in the decision. Keys received: {sorted(decision)[:8]}"
@@ -212,7 +212,11 @@ def parse_decision(text: str) -> Dict[str, Any]:
             raise ValueError(f"missing field {key!r} in action")
     if decision["diagnosis"] not in REGIMES:
         raise ValueError(f"diagnosis outside the allowed set: {decision['diagnosis']!r}")
-    decision["action"]["eta_scale"] = float(action["eta_scale"])
+    if action["eta_scale"] is not None and action["eta_scale"] not in (0.5, 1.0, 2.0):
+        raise ValueError(f"eta_scale {action['eta_scale']!r} is outside the action grid")
+    if action["noise_sigma"] not in (0.0, 0.05, 0.15):
+        raise ValueError(f"noise_sigma {action['noise_sigma']!r} is outside the action grid")
+    decision["action"]["eta_scale"] = None if action["eta_scale"] is None else float(action["eta_scale"])
     decision["action"]["noise_sigma"] = float(action["noise_sigma"])
     decision["action"]["restart"] = bool(action["restart"])
     raw_effect = decision.get("expected_effect")
@@ -259,7 +263,9 @@ def decide(
                 "ok": True,
                 "model": cfg.model,
                 "api_style": cfg.api_style,
-                "latency_s": latency,
+                "latency_s": time.perf_counter() - started,
+                "latency_successful_s": latency,
+                "n_attempts": len(attempts) + 1,
                 "decision": decision,
                 "raw": raw,
                 "usage": usage,

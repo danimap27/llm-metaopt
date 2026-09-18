@@ -79,21 +79,28 @@ def oracle_decision(
     theta: np.ndarray,
     spsa_cfg: SPSAConfig,
     e_min: float,
-    seed: int,
+    rng: np.random.Generator,
     lookahead: int,
     candidates: Sequence[Intervention],
     init_scale: float,
+    k_offset: int = 0,
 ) -> Tuple[Intervention, Dict[str, Any]]:
-    """Best counterfactual action, computed with the simulator (upper bound)."""
+    """Best counterfactual action, computed with the simulator (upper bound).
+
+    The rollout continues the deployed run: the SPSA schedules resume at the
+    global step ``k_offset`` and the Rademacher stream derives from the run's
+    own controller generator.
+    """
     label = label_state(
         energy_fn,
         theta,
         spsa_cfg,
         e_min=e_min,
-        seed=seed,
+        rng=np.random.default_rng(rng.integers(0, 2**31)),
         lookahead=lookahead,
         candidates=candidates,
         init_scale=init_scale,
+        k_offset=k_offset,
     )
     action = Intervention(**label["best_action"])  # type: ignore[arg-type]
     return action, {"oracle_improvement": label["improvement"], "oracle_gap": label["best_gap"]}
@@ -151,6 +158,11 @@ def run_closed_loop(
     for k in range(steps):
         if condition in _SLOW_LOOP_CONDITIONS and k > 0 and k % n_window == 0 and history:
             window = build_window(history, len(history) - 1, n_window, eta_scale=eta_scale, theta=theta)
+            # Reference for the XAI audit: the energy immediately before the
+            # intervention, so the observed effect is measured from the point
+            # the decision was made. Costs one evaluation per window for every
+            # controller condition, so the budget stays matched.
+            energy_pre = float(energy_fn(theta))
             info: Dict[str, Any] = {}
             if condition == "spsa_random":
                 action = random_decision(ctrl_rng, candidates)
@@ -158,7 +170,7 @@ def run_closed_loop(
                 action = heuristic_decision(window, candidates)
             elif condition == "spsa_oracle":
                 action, info = oracle_decision(
-                    energy_fn, theta, spsa_cfg, e_min, _event_seed(seed, k), lookahead, candidates, init_scale
+                    energy_fn, theta, spsa_cfg, e_min, ctrl_rng, lookahead, candidates, init_scale, k_offset=k
                 )
             elif condition == "spsa_policy" and policy is not None:
                 action = policy.predict(window)
@@ -175,8 +187,9 @@ def run_closed_loop(
                     if response.get("ok"):
                         llm_latency_total += float(response["latency_s"])
                         payload = response["decision"]
+                        raw_eta = payload["action"]["eta_scale"]
                         action = Intervention(
-                            eta_scale=float(payload["action"]["eta_scale"]),
+                            eta_scale=None if raw_eta is None else float(raw_eta),
                             noise_sigma=float(payload["action"]["noise_sigma"]),
                             restart=bool(payload["action"]["restart"]),
                         )
@@ -185,6 +198,7 @@ def run_closed_loop(
                             "justification": payload["justification"],
                             "expected_effect": payload["expected_effect"],
                             "latency_s": response["latency_s"],
+                            "n_attempts": response.get("n_attempts"),
                         }
                     else:
                         llm_failures += 1
@@ -201,7 +215,10 @@ def run_closed_loop(
             else:
                 action = NO_OP
 
-            eta_scale = float(action.eta_scale) if action.eta_scale > 0 else 1.0
+            # eta_scale None means "keep the current multiplier", so a no-op
+            # or a failed call does not reset a previously granted change.
+            if action.eta_scale is not None:
+                eta_scale = float(action.eta_scale)
             is_noop = action == NO_OP
             if not is_noop:
                 n_changes += 1
@@ -219,6 +236,7 @@ def run_closed_loop(
                     "condition": condition,
                     "action": action.to_dict(),
                     "eta_scale": eta_scale,
+                    "energy_pre": energy_pre,
                     "is_noop": is_noop,
                     **info,
                 }
@@ -546,8 +564,9 @@ def run_drift_loop(
                 if response.get("ok"):
                     llm_latency += float(response["latency_s"])
                     payload = response["decision"]
+                    raw_eta = payload["action"]["eta_scale"]
                     action = Intervention(
-                        eta_scale=float(payload["action"]["eta_scale"]),
+                        eta_scale=None if raw_eta is None else float(raw_eta),
                         noise_sigma=float(payload["action"]["noise_sigma"]),
                         restart=bool(payload["action"]["restart"]),
                     )
@@ -557,6 +576,7 @@ def run_drift_loop(
                             "justification": payload["justification"],
                             "expected_effect": payload["expected_effect"],
                             "latency_s": response["latency_s"],
+                            "n_attempts": response.get("n_attempts"),
                             "cached": bool(response.get("cached", False)),
                         }
                     )
@@ -579,7 +599,9 @@ def run_drift_loop(
                     rng=ctrl_rng,
                     init_scale=objective.spec.init_scale,
                 )
-            eta_scale = float(action.eta_scale) if action.eta_scale > 0 else 1.0
+            # eta_scale None means "keep the current multiplier" (B7 fairness fix).
+            if action.eta_scale is not None:
+                eta_scale = float(action.eta_scale)
             events.append(
                 {
                     "step": step,
@@ -591,17 +613,20 @@ def run_drift_loop(
                     **info,
                 }
             )
-            pending = None if condition == "drift_detector" else len(events) - 1
+            # The safeguard applies uniformly to every controller condition, so
+            # no arm is protected from its own harmful interventions while the
+            # classical baselines absorb theirs.
+            pending = len(events) - 1
 
         theta, record = spsa_step(
             lambda th, s=step: objective.energy(s, th), theta, spsa_cfg, step, fast_rng, eta_scale
         )
-        energy = objective.energy(step, theta)
         history.append(
             {
                 "step": step,
-                "energy": energy,
-                "gap": energy - objective.e_min(step),
+                # spsa_step already evaluated the true energy of the new iterate.
+                "energy": record["energy"],
+                "gap": record["energy"] - objective.e_min(step),
                 "segment": objective.segment_of(step),
                 "grad_norm": record["grad_norm"],
                 "a_k": record["a_k"],

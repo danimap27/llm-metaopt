@@ -62,8 +62,9 @@ def test_detector_condition_restarts_after_the_boundary():
     assert result["detection_latency"] is not None
     assert any(event["action"]["restart"] for event in result["events"])
     assert any(event.get("alarm") for event in result["events"])
-    # The safeguard belongs to the supervised controller, not to the classical baseline.
-    assert result["n_reverted"] == 0
+    # The safeguard now applies uniformly to every controller condition
+    # (adversarial review finding B3), so detector restarts can be reverted
+    # like any other harmful intervention instead of being exempt.
 
 
 def test_detector_restarts_respect_the_cooldown():
@@ -101,15 +102,18 @@ def test_llm_condition_survives_an_unreachable_endpoint():
 
 
 def test_safeguard_reverts_a_degrading_intervention():
+    # A detector that alarms on every sample restarts every cooldown window;
+    # with the uniform safeguard those harmful restarts must be reverted.
     spec = _spec()
     result = run_drift_loop(
-        "drift_random",
+        "drift_detector",
         DriftingObjective(spec),
         _theta0(spec),
         SPSAConfig(seed=0),
         n_window=4,
         threshold=0.05,
         seed=1,
+        detector_threshold=-1.0,  # alarms on every sample
         safeguard_epsilon=0.0,
     )
     assert result["n_reverted"] >= 1
