@@ -61,6 +61,22 @@ depth-4 result also repairs the motivation-experiment split: the benchmark
 now contains a genuinely hard landscape (deep, wide, noisy), measured rather
 than asserted.
 
+### Diagnosis on real windows (state v2, 2026-09-19)
+
+The first v2 probe over real stall-cell windows found a boundary problem, not
+a model failure. With the absolute descent threshold at 0.01, the run's
+windows (which lose 0.004 per window on a 13.3 gap) were labelled stalled
+while the model answered `DESCENDING` with high confidence: agreement 1 of 4.
+The window series showed a genuinely slow but consistent descent (0.06 of
+gap over 90 steps), so the model's reading was defensible and the threshold
+was the arbitrary part. Re-calibrated to 0.002, agreement rises to 3 of 4,
+with the single miss being a 0.0016-versus-0.002 boundary window. The paper
+reports the threshold sensitivity (accuracy at several thresholds) alongside
+accuracy, and treats boundary windows as the documented ambiguity they are.
+The action side is a separate and open question: on slow-descent windows the
+model chooses `slow_down`, which halves the step size exactly when the run is
+already slow, and the final gaps reflect it.
+
 ### Oracle margin stage on the L4 cell (3 seeds, measured)
 
 Vanilla SPSA mean final gap 13.32; oracle mean 13.14; paired differences
