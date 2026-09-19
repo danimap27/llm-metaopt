@@ -104,7 +104,8 @@ def main() -> None:
     print(f"usage: {json.dumps(usage)}")
     print(f"regime: {response.answers['regime'].choice}")
     print(f"regime probabilities: {json.dumps(response.answers['regime'].probabilities)}")
-    print(f"gap_improves (noul): {response.answers['gap_improves'].noul}")
+    noul_key = "improves" if args.compact else "gap_improves"
+    print(f"{noul_key} (noul): {response.answers[noul_key].noul}")
     print(f"attempts: {len(response.debug.get('llm_attempts', []))}")
     client.close()
 
