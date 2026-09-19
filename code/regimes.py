@@ -59,7 +59,7 @@ class RegimeConfig:
     n_directions: int = 8
     seed: int = 0
     # Observable-taxonomy thresholds.
-    desc_eps: float = 0.01   # net window improvement above this counts as descent
+    desc_eps: float = 0.002  # net window improvement above this counts as descent
     osc_abs: float = 0.05    # absolute energy std floor for oscillation
     osc_ratio: float = 5.0   # std over max(|improvement|) for oscillation
 
