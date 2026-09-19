@@ -96,6 +96,15 @@ class and every chat-model class: only sub-second decisions can pay. That is
 the C4 thesis instantiated in one table, and it is the kind of number no
 prior work reports.
 
+The xy cell (8q, p=0.05) measured the same way is **not eligible at Jev
+latency**: vanilla SPSA 8.95 versus oracle 8.74, recovery 0.0184 per call
+against a 0.035 requirement at 0.65 s. It would become eligible only below
+roughly 0.34 s of call latency. Across the three cells measured so far the
+eligibility line sweeps the serving classes: the 4-qubit smoke cell is
+ineligible at every class, the L4 stall cell admits the sub-second class
+only, and the xy cell admits only the sub-0.34-second class. That is exactly
+the axis the paper reports.
+
 Two readings temper the enthusiasm. The margin is 1.6x, below the 2x safety
 factor the plan prefers, so more seeds are needed before the gate experiment
 (the paired effect is strong, d_z = 5.5, but the gap is thin). And the total
