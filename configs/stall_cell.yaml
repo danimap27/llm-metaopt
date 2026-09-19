@@ -1,0 +1,45 @@
+# Stall cell: heisenberg 8q p=0.05 with a depth-4 ansatz.
+# Screening found a late-phase velocity of 0.015 gap/s here, the primary
+# candidate for a cell where supervision can pay (docs/q1-strong-paper-plan.md).
+
+ansatz:
+  n_layers: 4
+
+spsa:
+  steps: 120
+  a: 0.25
+  c: 0.1
+  alpha: 0.602
+  gamma: 0.101
+  A: 10.0
+
+windows:
+  n_window: 10
+  lookahead: 10
+  max_labels_per_run: 4
+  label_repeats: 3
+
+safeguard_epsilon: 0.05
+
+regimes:
+  tol_ok: 0.05
+  eps_bp: 0.0001
+  min_improvement: 0.001
+  eps_grad_local: 0.005
+  n_directions: 6
+
+sweep:
+  hamiltonians: [heisenberg]
+  n_qubits: [8]
+  noise_p: [0.05]
+  seeds: [0, 1, 2]
+  init_scale: 0.5
+  shots: 1024
+
+llm:
+  base_url: http://127.0.0.1:11434
+  model: qwen3.5:4b
+  api_style: ollama
+  no_think: true
+  cache: results/llm_cache.jsonl
+  replay: false
