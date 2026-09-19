@@ -99,3 +99,32 @@ change rather than a rewrite.
 
 Early access requires an account at `console.typesafe.ai` and an API key.
 That is the author's call, not a technical blocker.
+
+## Verified: the pattern runs locally (2026-09-19)
+
+Jev itself is API-only (no weights, no self-hosting option in the docs), but
+the System One pattern was executed end to end on the homelab with the
+official MIT adapter (`system-one-adapter[openai]`) pointed at the local
+Ollama server (`llama3.2:3b`, OpenAI-compatible `chat_completions`,
+`structured_outputs=True`). One `Choice` question (regime diagnosis over the
+four identifiable labels) and one `Noul` question (will the gap improve) were
+answered against a real telemetry window from this benchmark:
+
+- Regime: `CONVERGENCIA_OK` with `probabilities` {1.0, 0.0, 0.0, 0.0} over
+  the criteria map, which is a defensible reading of the window (flat energy,
+  gradient norm 2e-4, improvement 1e-3).
+- Improvement probability (`noul`): 0.0.
+- Structured output validated on the first attempt
+  (`n_retries_malformed_structure: 0`), with usage (`input_tokens`,
+  `output_tokens`, `latency`) and the full attempt history in the response.
+- Wall clock: 11.3 s on the homelab CPU. The same call on the 2x3090 node
+  with vLLM is expected below one second; a small model on GPU is the only
+  way to approach the hundred-millisecond latency class locally.
+
+What the local path gives: the typed-question contract, schema-enforced
+answers, probability vectors, retry and usage accounting, and full
+reproducibility, all offline. What it does not give: the vendor's calibrated
+probabilities (a prompted LLM distribution is miscalibrated by default, which
+is itself a measurable claim for the calibration analysis) and the specialized
+serving latency. The probe script is `scripts/systemone_local_probe.py`
+(run it in a throwaway venv, it needs the optional extra).
