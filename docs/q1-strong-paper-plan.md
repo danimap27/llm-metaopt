@@ -61,6 +61,34 @@ depth-4 result also repairs the motivation-experiment split: the benchmark
 now contains a genuinely hard landscape (deep, wide, noisy), measured rather
 than asserted.
 
+### Oracle margin stage on the L4 cell (3 seeds, measured)
+
+Vanilla SPSA mean final gap 13.32; oracle mean 13.14; paired differences
+0.143, 0.206, 0.191 (mean 0.180, d_z = 5.5 against run noise). Recovery per
+call: **0.0163 gap units**. Compare with the required gain per serving class
+in this cell:
+
+| Serving class | latency | required per call | oracle recovers 0.0163 | eligible |
+|---|---|---|---|---|
+| Jev (System One) | 0.65 s | 0.010 | yes | **yes, margin 1.6x** |
+| hosted chat fast | 2.6 s | 0.039 | no | no |
+| hosted chat slow | 12.2 s | 0.183 | no | no |
+| local 4B on CPU | 110 s | 1.65 | no | no |
+
+In this cell the eligibility line falls between the hundred-millisecond
+class and every chat-model class: only sub-second decisions can pay. That is
+the C4 thesis instantiated in one table, and it is the kind of number no
+prior work reports.
+
+Two readings temper the enthusiasm. The margin is 1.6x, below the 2x safety
+factor the plan prefers, so more seeds are needed before the gate experiment
+(the paired effect is strong, d_z = 5.5, but the gap is thin). And the total
+window-intervention ceiling is 0.18 gap units, 1.4 percent of the remaining
+gap: at this depth the mid-run intervention budget is intrinsically small,
+and any positive result will be about the recovery fraction and the rate,
+not about a dramatic gap reduction. The large-effect lever in this cell is
+initialization (Engine B), exactly as the plan expected.
+
 The oracle margin stage runs next for the cells whose velocity is low and
 whose remaining gap is large. Expected candidates: `heisenberg 8q p=0.05 L4`
 (deeper ansatz), `heisenberg 16q p=0` (plateau-like start, noiseless),
@@ -164,7 +192,9 @@ criterion and the benchmark (fallback venue).
 
 ## 7. Immediate next actions
 
-1. Finish the screen, run oracle margins on the eligible shortlist.
+1. ~~Finish the screen, run oracle margins on the eligible shortlist.~~
+   Done: L4 cell eligible at Jev latency with a 1.6x margin; xy cell margin
+   pending (screen velocity 0.054, oracle stage next).
 2. Implement state v2 + action grid v2 (observable regimes, reheat, eta x 5)
    with tests; re-run the diagnosis probe.
 3. Run the gate experiment (Engine A) on the best eligible cell; then the
