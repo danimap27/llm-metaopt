@@ -128,3 +128,35 @@ probabilities (a prompted LLM distribution is miscalibrated by default, which
 is itself a measurable claim for the calibration analysis) and the specialized
 serving latency. The probe script is `scripts/systemone_local_probe.py`
 (run it in a throwaway venv, it needs the optional extra).
+
+## Measured latency budget and its reduction levers (CPU, 2026-09-19)
+
+Raw Ollama timings (`/api/chat`, one question, about 150 input and 60 output
+tokens) and adapter-level timings (two questions, 272 to 295 input tokens),
+all on the homelab CPU (i5-8500). Decoding dominates, not loading:
+
+| Configuration | Tokens out | Wall, warm | Note |
+|---|---|---|---|
+| `gemma3:1b`, raw endpoint | 51 | 3.4 s | 19.0 tok/s decode; cold call 4.4 s (prefill 0.9 s) |
+| `llama3.2:3b`, raw endpoint | 64 | 7.5 s | 11.3 tok/s; cold call 11.3 s (prefill 3.7 s) |
+| `gemma3:4b-it`, raw endpoint | 66 | 8.2 s | 8.9 tok/s |
+| `gemma3:1b`, adapter, 2 questions | 118-166 | 9.0-13.1 s | full answer envelope is the cost |
+| `gemma3:1b`, adapter, compact criteria | 70-74 | 5.9-6.6 s | short keys and terse instructions: about 40 percent less wall time |
+| `llama3.2:3b`, adapter, compact criteria | 67 | 7.5 s | same lever on the 3B model |
+
+The levers measured today, in order of effect: use the smallest capable model
+(the 1B decodes twice as fast as the 3B), shrink the answer envelope (short
+criteria keys, one question instead of two, fewer requested fields), and keep
+the model resident (`keep_alive`; model load itself is 0.1 to 0.3 s, the cold
+prefill is the larger 0.9 to 3.7 s cost). The CPU floor is around three to six
+seconds per call with the current envelope and no amount of tuning crosses it,
+because it is bounded by 8 to 19 tokens per second of decoding.
+
+The reduction that matters is the GPU node: vLLM on one RTX 3090 decodes a 3B
+model at more than a thousand tokens per second, so the same 70-token answer
+lands in roughly 0.1 to 0.3 s including prefill, which is the hundred-
+millisecond serving class. These configurations are exactly the serving axis
+of the cost-benefit table, so the measurements feed C4 directly. An incidental
+observation for the calibration analysis: the same window received different
+diagnoses from different models (`CONVERGENCIA_OK` versus `MINIMO_LOCAL`),
+which is the miscalibration the calibration curve is meant to quantify.

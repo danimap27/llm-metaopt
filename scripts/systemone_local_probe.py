@@ -29,6 +29,11 @@ def main() -> None:
     parser.add_argument("--base-url", default="http://127.0.0.1:11434/v1")
     parser.add_argument("--model", default="llama3.2:3b")
     parser.add_argument("--api", default="chat_completions", choices=["chat_completions", "responses"])
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="short keys and terse instructions; reduces output tokens (the decode-dominant cost on CPU)",
+    )
     args = parser.parse_args()
 
     state = json.dumps(
@@ -41,6 +46,37 @@ def main() -> None:
             "progress": {"drop_from_start": 0.17, "gap_above_best_so_far": 0.0},
         }
     )
+
+    if args.compact:
+        regime_question = Choice(
+            instructions="Diagnose the regime",
+            criteria={
+                "CONV": "at the best value",
+                "BP": "gradients vanish",
+                "LOCAL": "stalled, small gradient",
+                "ROUGH": "stalled, non-small gradient",
+            },
+        )
+        questions = {
+            "regime": regime_question,
+            "improves": Noul(instructions="Gap improves next window"),
+        }
+    else:
+        regime_question = Choice(
+            instructions="Diagnose the optimization regime of this telemetry window",
+            criteria={
+                "CONVERGENCIA_OK": "energy at the best reachable value",
+                "BARREN_PLATEAU": "gradients vanish in every direction far from the optimum",
+                "MINIMO_LOCAL": "no improvement with small gradient away from the optimum",
+                "MESETA_ENERGIA": "no improvement with a non-negligible gradient",
+            },
+        )
+        questions = {
+            "regime": regime_question,
+            "gap_improves": Noul(
+                instructions="The energy gap will improve over the next window of optimization steps",
+            ),
+        }
 
     client = SystemOneAdapterClient(
         structured_outputs=True,
@@ -58,20 +94,7 @@ def main() -> None:
     started = time.perf_counter()
     response = client.system_one(
         state=state,
-        questions={
-            "regime": Choice(
-                instructions="Diagnose the optimization regime of this telemetry window",
-                criteria={
-                    "CONVERGENCIA_OK": "energy at the best reachable value",
-                    "BARREN_PLATEAU": "gradients vanish in every direction far from the optimum",
-                    "MINIMO_LOCAL": "no improvement with small gradient away from the optimum",
-                    "MESETA_ENERGIA": "no improvement with a non-negligible gradient",
-                },
-            ),
-            "gap_improves": Noul(
-                instructions="The energy gap will improve over the next window of optimization steps",
-            ),
-        },
+        questions=questions,
         model=provider,
     )
     wall = time.perf_counter() - started
