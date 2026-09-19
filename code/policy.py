@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
-from .labeler import Intervention
+from .labeler import Intervention, default_candidates
 
 # Flattening order of the window the LLM sees. Keep in sync with
 # telemetry.build_window: same fields, same order.
@@ -80,15 +80,7 @@ class LogisticPolicy:
     """Multinomial logistic policy trained on counterfactual labels."""
 
     def __init__(self, candidates: Optional[Sequence[Intervention]] = None) -> None:
-        self.candidates: List[Intervention] = list(candidates) if candidates else [
-            Intervention(),
-            Intervention(eta_scale=0.5),
-            Intervention(eta_scale=2.0),
-            Intervention(noise_sigma=0.05),
-            Intervention(noise_sigma=0.15),
-            Intervention(eta_scale=2.0, noise_sigma=0.05),
-            Intervention(restart=True),
-        ]
+        self.candidates: List[Intervention] = list(candidates) if candidates else default_candidates()
         self.weights: Optional[np.ndarray] = None  # shape (n_actions, n_features)
 
     def fit(

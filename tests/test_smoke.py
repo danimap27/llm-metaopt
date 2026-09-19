@@ -192,7 +192,7 @@ def test_label_state_returns_valid_action():
         lookahead=10,
         candidates=[NO_OP, Intervention(eta_scale=2.0), Intervention(noise_sigma=0.1)],
     )
-    assert set(label["best_action"]) == {"eta_scale", "noise_sigma", "restart"}
+    assert set(label["best_action"]) == {"eta_scale", "noise_sigma", "restart", "reheat"}
     assert label["best_gap"] <= label["baseline_gap"]
     assert len(label["candidates"]) == 3
 

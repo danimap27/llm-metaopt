@@ -32,12 +32,13 @@ import yaml
 
 from . import sweep as sweep_module
 from . import vqe
+from .init_strategies import INIT_STRATEGIES, theta0_for
 from .labeler import NO_OP, Intervention, default_candidates, label_state
 from .llm_cache import ResponseCache
-from .llm_client import LLMConfig, decide as llm_decide, decide_cached
+from .llm_client import LLMConfig, decide as llm_decide, decide_cached, decide_init
 from .optimizer import SPSAConfig, apply_intervention, counting_energy_fn, spsa_step
 from .policy import LogisticPolicy, load_policy
-from .regimes import REGIMES, RegimeConfig
+from .regimes import OBSERVABLE_REGIMES, REGIMES, RegimeConfig
 from .telemetry import build_window
 
 CONDITIONS: Tuple[str, ...] = (
@@ -49,6 +50,11 @@ CONDITIONS: Tuple[str, ...] = (
     "spsa_effect",
     "spsa_llm",
     "spsa_llm_async",
+    "spsa_llm_gate",
+    "spsa_gate_restart",
+    "spsa_llm_init",
+    "spsa_init_random",
+    "spsa_init_fixed",
 )
 
 _SLOW_LOOP_CONDITIONS = {
@@ -59,6 +65,8 @@ _SLOW_LOOP_CONDITIONS = {
     "spsa_effect",
     "spsa_llm",
     "spsa_llm_async",
+    "spsa_llm_gate",
+    "spsa_gate_restart",
 }
 
 # The response cache appends to a shared JSONL file, so cached calls from
@@ -182,6 +190,7 @@ def run_closed_loop(
     policy: Optional[LogisticPolicy] = None,
     safeguard_epsilon: float = 0.05,
     async_drain_timeout_s: float = 5.0,
+    gate_improvement: float = 0.05,
 ) -> Dict[str, Any]:
     """Run one closed-loop trajectory and return its metrics."""
     candidates = list(default_candidates() if candidates is None else candidates)
@@ -201,11 +210,14 @@ def run_closed_loop(
     started = time.perf_counter()
     # Index into ``events`` of an intervention whose safeguard window is open.
     pending: Optional[int] = None
+    # Reheat bookkeeping: the SPSA schedules use ``k - schedule_shift`` as
+    # their clock, so a reheat action resets the decay from that step on.
+    schedule_shift = 0
     # Asynchronous slow-loop calls in flight, waiting for their response.
     pending_async: List[Dict[str, Any]] = []
 
     def _apply_async(slot: Dict[str, Any], response: Dict[str, Any], at_step: int) -> None:
-        nonlocal theta, eta_scale, n_changes, llm_latency_total, llm_failures, pending
+        nonlocal theta, eta_scale, n_changes, llm_latency_total, llm_failures, pending, schedule_shift
         event = events[slot["event_index"]]
         if response.get("ok"):
             llm_latency_total += float(response["latency_s"])
@@ -215,6 +227,7 @@ def run_closed_loop(
                 eta_scale=None if raw_eta is None else float(raw_eta),
                 noise_sigma=float(payload["action"]["noise_sigma"]),
                 restart=bool(payload["action"]["restart"]),
+                reheat=bool(payload["action"].get("reheat", False)),
             )
             event.update(
                 {
@@ -245,8 +258,12 @@ def run_closed_loop(
         event["applied"] = True
         event["action"] = action.to_dict()
         event["is_noop"] = action == NO_OP
+        event["eta_before"] = eta_scale
+        event["shift_before"] = schedule_shift
         if action.eta_scale is not None:
             eta_scale = float(action.eta_scale)
+        if action.reheat:
+            schedule_shift = at_step
         event["eta_scale"] = eta_scale
         if action != NO_OP:
             n_changes += 1
@@ -275,6 +292,7 @@ def run_closed_loop(
             ):
                 theta = np.asarray(event["theta_snapshot"], dtype=float)
                 eta_scale = float(event["eta_before"])
+                schedule_shift = int(event.get("shift_before", schedule_shift))
                 event["reverted"] = True
             pending = None
         # Drain completed asynchronous calls and apply their action to the
@@ -295,6 +313,11 @@ def run_closed_loop(
             # controller condition, so the budget stays matched.
             energy_pre = float(energy_fn(theta))
             info: Dict[str, Any] = {}
+            # Engine A gate: with ``*_gate`` conditions a call is spent only
+            # when the fast loop is not making progress.
+            gate_skipped = False
+            if condition in ("spsa_llm_gate", "spsa_gate_restart"):
+                gate_skipped = float(window["improvement"]) > gate_improvement  # type: ignore[index]
             if condition == "spsa_random":
                 action = random_decision(ctrl_rng, candidates)
             elif condition == "spsa_heuristic":
@@ -327,8 +350,17 @@ def run_closed_loop(
                     pending_async.append(slot)
                     action = NO_OP
                     info = {"async_pending": True}
-            elif condition == "spsa_llm":
-                if llm_cfg is None:
+            elif condition == "spsa_gate_restart":
+                if gate_skipped:
+                    action = NO_OP
+                    info["gated"] = True
+                else:
+                    action = Intervention(restart=True)
+            elif condition in ("spsa_llm", "spsa_llm_gate"):
+                if condition == "spsa_llm_gate" and gate_skipped:
+                    action = NO_OP
+                    info["gated"] = True
+                elif llm_cfg is None:
                     action = NO_OP
                 else:
                     response = _llm_call_sync(window, llm_cfg, cache, llm_session)
@@ -341,6 +373,7 @@ def run_closed_loop(
                             eta_scale=None if raw_eta is None else float(raw_eta),
                             noise_sigma=float(payload["action"]["noise_sigma"]),
                             restart=bool(payload["action"]["restart"]),
+                            reheat=bool(payload["action"].get("reheat", False)),
                         )
                         info = {
                             "diagnosis": payload["diagnosis"],
@@ -375,8 +408,11 @@ def run_closed_loop(
             # eta_scale None means "keep the current multiplier", so a no-op
             # or a failed call does not reset a previously granted change.
             eta_before = eta_scale
+            shift_before = schedule_shift
             if action.eta_scale is not None:
                 eta_scale = float(action.eta_scale)
+            if action.reheat:
+                schedule_shift = k
             is_noop = action == NO_OP
             if not is_noop:
                 n_changes += 1
@@ -396,6 +432,7 @@ def run_closed_loop(
                     "action": action.to_dict(),
                     "eta_scale": eta_scale,
                     "eta_before": eta_before,
+                    "shift_before": shift_before,
                     "energy_pre": energy_pre,
                     "theta_snapshot": None if is_noop else theta_snapshot.tolist(),
                     # The raw window is stored for LLM runs so the occlusion
@@ -409,7 +446,7 @@ def run_closed_loop(
             if condition == "spsa_llm_async" and pending_async and "event_index" not in pending_async[-1]:
                 pending_async[-1]["event_index"] = len(events) - 1
 
-        theta, record = spsa_step(energy_fn, theta, spsa_cfg, k, fast_rng, eta_scale)
+        theta, record = spsa_step(energy_fn, theta, spsa_cfg, k - schedule_shift, fast_rng, eta_scale)
         history.append(record)
         if steps_to_threshold is None and abs(float(record["energy"]) - e_min) <= threshold:
             steps_to_threshold = k
@@ -453,6 +490,7 @@ def run_closed_loop(
         "llm_latency_mean_s": (llm_latency_total / n_llm_calls) if n_llm_calls else None,
         "wall_s": wall_s,
         "energy_curve": [float(r["energy"]) for r in history],
+        "a_k_curve": [float(r["a_k"]) for r in history],
         "events": events,
     }
 
@@ -558,9 +596,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         api_style=str(args.llm_api_style or llm_defaults.get("api_style", "openai")),
         no_think=bool(args.llm_no_think or llm_defaults.get("no_think", False)),
         extra_body=dict(llm_defaults.get("extra_body", {}) or {}),
-        # Static objective: the model is not offered CONCEPT_DRIFT, which it
-        # could never identify from a static-run window (review finding M4).
-        regimes=tuple(name for name in REGIMES if name != "CONCEPT_DRIFT"),
+        # Static objective: the observable taxonomy, decidable from the
+        # window the controller receives (review finding M4).
+        regimes=OBSERVABLE_REGIMES,
     )
     if "spsa_llm" in conditions:
         print(
@@ -586,9 +624,51 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             energy_fn, eval_counter = counting_energy_fn(
                 vqe.make_energy_fn(hamiltonian, run["n_qubits"], run["n_layers"], noise_p=run["noise_p"], shots=shots)
             )
-            theta0 = vqe.random_initial_theta(
-                np.random.default_rng(run["seed"]), run["n_qubits"], run["n_layers"], scale=run["init_scale"]
-            )
+            # Engine B: initialization strategies. Init conditions replace the
+            # seed-default theta0; the choice (model, random or fixed) is
+            # recorded in the run metadata. A separate RNG stream keeps the
+            # strategy generation independent of the fast-loop stream.
+            strategy: Optional[str] = None
+            init_info: Dict[str, Any] = {}
+            if run["condition"] == "spsa_llm_init" and llm_cfg is not None:
+                problem = {
+                    "hamiltonian": run["hamiltonian"],
+                    "n_qubits": run["n_qubits"],
+                    "noise_p": run["noise_p"],
+                    "n_layers": run["n_layers"],
+                    "steps": steps,
+                }
+                response = decide_init(problem, llm_cfg)
+                if response.get("ok"):
+                    strategy = str(response["strategy"])
+                    init_info = {
+                        "init_strategy": strategy,
+                        "init_latency_s": response["latency_s"],
+                        "init_probabilities": response.get("probabilities"),
+                        "converges_prob": response.get("converges_prob"),
+                    }
+                else:
+                    strategy = "uniform_pm_pi2"
+                    init_info = {"init_strategy": strategy, "init_failed": True}
+            elif run["condition"] == "spsa_init_random":
+                pick = np.random.default_rng(run["seed"] + 31337).integers(0, len(INIT_STRATEGIES))
+                strategy = str(INIT_STRATEGIES[int(pick)])
+                init_info = {"init_strategy": strategy}
+            elif run["condition"] == "spsa_init_fixed":
+                strategy = str(cfg.get("init", {}).get("fixed_strategy", "uniform_pm_pi2"))
+                init_info = {"init_strategy": strategy}
+            if strategy is not None:
+                theta0 = theta0_for(
+                    strategy,
+                    np.random.default_rng(run["seed"] + 777),
+                    run["n_qubits"],
+                    run["n_layers"],
+                    run["init_scale"],
+                )
+            else:
+                theta0 = vqe.random_initial_theta(
+                    np.random.default_rng(run["seed"]), run["n_qubits"], run["n_layers"], scale=run["init_scale"]
+                )
             result = run_closed_loop(
                 run["condition"],
                 energy_fn,
@@ -605,6 +685,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 cache=cache,
                 policy=policy,
                 safeguard_epsilon=float(cfg.get("safeguard_epsilon", 0.05)),
+                gate_improvement=float(cfg.get("gate_improvement", 0.05)),
             )
             record = {
                 "kind": "run",
@@ -623,6 +704,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "cache": cache_path if run["condition"] == "spsa_llm" else None,
                 "replay": replay if run["condition"] == "spsa_llm" else None,
                 "mock_llm": bool(args.mock_llm),
+                **init_info,
             }
             handle.write(json.dumps(_clean_nan(record), ensure_ascii=False) + "\n")
             handle.flush()
@@ -737,6 +819,7 @@ def run_drift_loop(
     boundaries = set(int(value) for value in objective.spec.boundaries())
     total_steps = int(objective.spec.total_steps)
     eta_scale = 1.0
+    schedule_shift = 0
     llm_calls = 0
     llm_latency = 0.0
     llm_failures = 0
@@ -744,12 +827,14 @@ def run_drift_loop(
 
     def _close_window(index: Optional[int]) -> None:
         """Apply the safeguard to the window that just finished."""
-        nonlocal theta
+        nonlocal theta, eta_scale, schedule_shift
         if index is None:
             return
         event = events[index]
         if history and (float(history[-1]["gap"]) - float(event["gap_before"])) > safeguard_epsilon:
             theta = np.asarray(event["theta_snapshot"], dtype=float)
+            eta_scale = float(event.get("eta_before", eta_scale))
+            schedule_shift = int(event.get("shift_before", schedule_shift))
             event["reverted"] = True
         event.pop("theta_snapshot", None)
 
@@ -778,6 +863,7 @@ def run_drift_loop(
                         eta_scale=None if raw_eta is None else float(raw_eta),
                         noise_sigma=float(payload["action"]["noise_sigma"]),
                         restart=bool(payload["action"]["restart"]),
+                        reheat=bool(payload["action"].get("reheat", False)),
                     )
                     info.update(
                         {
@@ -809,8 +895,12 @@ def run_drift_loop(
                     init_scale=objective.spec.init_scale,
                 )
             # eta_scale None means "keep the current multiplier" (B7 fairness fix).
+            eta_before = eta_scale
+            shift_before = schedule_shift
             if action.eta_scale is not None:
                 eta_scale = float(action.eta_scale)
+            if action.reheat:
+                schedule_shift = step
             events.append(
                 {
                     "step": step,
@@ -818,6 +908,8 @@ def run_drift_loop(
                     "action": action.to_dict(),
                     "changed": changed,
                     "gap_before": float(history[-1]["gap"]) if history else 0.0,
+                    "eta_before": eta_before,
+                    "shift_before": shift_before,
                     "theta_snapshot": theta_snapshot.tolist(),
                     **info,
                 }
@@ -828,7 +920,12 @@ def run_drift_loop(
             pending = len(events) - 1
 
         theta, record = spsa_step(
-            lambda th, s=step: objective.energy(s, th), theta, spsa_cfg, step, fast_rng, eta_scale
+            lambda th, s=step: objective.energy(s, th),
+            theta,
+            spsa_cfg,
+            step - schedule_shift,
+            fast_rng,
+            eta_scale,
         )
         history.append(
             {

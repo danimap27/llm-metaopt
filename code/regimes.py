@@ -32,6 +32,16 @@ REGIMES: Tuple[str, ...] = (
     "CONCEPT_DRIFT",
 )
 
+# Observable taxonomy for the static block: every label is decidable from the
+# telemetry the controller receives, so the diagnosis is identifiable from its
+# inputs (review finding M4, confirmed empirically against Jev).
+OBSERVABLE_REGIMES: Tuple[str, ...] = (
+    "DESCENDING",
+    "STALLED_NO_GRADIENT",
+    "STALLED_WITH_GRADIENT",
+    "OSCILLATING",
+)
+
 
 @dataclass
 class RegimeConfig:
@@ -48,9 +58,51 @@ class RegimeConfig:
     eps_grad_local: float = 5e-3
     n_directions: int = 8
     seed: int = 0
+    # Observable-taxonomy thresholds.
+    desc_eps: float = 0.01   # net window improvement above this counts as descent
+    osc_abs: float = 0.05    # absolute energy std floor for oscillation
+    osc_ratio: float = 5.0   # std over max(|improvement|) for oscillation
 
     def to_dict(self) -> Dict[str, float]:
         return asdict(self)
+
+
+def diagnose_observable(
+    window_improvement: float,
+    energy_std: float,
+    grad_norm_last: float,
+    cfg: RegimeConfig | None = None,
+) -> Dict[str, object]:
+    """Ground-truth regime from window-observable quantities only.
+
+    Precedence: net progress beats shape, oscillation beats stall, and stalls
+    split on whether the gradient estimate is alive. All three inputs are
+    present in the telemetry window, so this taxonomy is identifiable from
+    the controller's inputs.
+    """
+    cfg = RegimeConfig() if cfg is None else cfg
+    details: Dict[str, object] = {
+        "window_improvement": float(window_improvement),
+        "energy_std": float(energy_std),
+        "grad_norm_last": float(grad_norm_last),
+    }
+    if float(window_improvement) > cfg.desc_eps:
+        label, reason = "DESCENDING", (
+            f"net improvement {window_improvement:.4f} > desc_eps = {cfg.desc_eps}"
+        )
+    elif float(energy_std) > max(cfg.osc_abs, cfg.osc_ratio * abs(float(window_improvement))):
+        label, reason = "OSCILLATING", (
+            f"energy std {energy_std:.4f} large against net improvement {window_improvement:.4f}"
+        )
+    elif abs(float(grad_norm_last)) <= cfg.eps_grad_local:
+        label, reason = "STALLED_NO_GRADIENT", (
+            f"flat window with |grad| = {grad_norm_last:.2e} <= {cfg.eps_grad_local:.1e}"
+        )
+    else:
+        label, reason = "STALLED_WITH_GRADIENT", (
+            f"flat window with |grad| = {grad_norm_last:.2e}"
+        )
+    return {"label": label, "reason": reason, "details": details}
 
 
 def directional_gradient_variance(

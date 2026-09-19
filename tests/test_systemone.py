@@ -86,7 +86,7 @@ def test_answers_map_onto_the_decision_contract() -> None:
     cfg = LLMConfig(api_style="systemone")
     decision = parse_systemone_answers(_answers(), cfg)
     assert decision["diagnosis"] == "MESETA_ENERGIA"
-    assert decision["action"] == {"eta_scale": 0.5, "noise_sigma": 0.0, "restart": False}
+    assert decision["action"] == {"eta_scale": 0.5, "noise_sigma": 0.0, "restart": False, "reheat": False}
     assert decision["expected_effect"] == 0.75  # 2.5 interpolates between 0.5 and 1.0
     assert decision["improvement_probability"] == 0.8
     assert decision["action_name"] == "slow_down"

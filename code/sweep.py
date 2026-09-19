@@ -26,7 +26,7 @@ import yaml
 from . import vqe
 from .labeler import label_state
 from .optimizer import SPSAConfig, counting_energy_fn, run_spsa
-from .regimes import RegimeConfig, diagnose, directional_gradient_variance
+from .regimes import RegimeConfig, diagnose, diagnose_observable, directional_gradient_variance
 from .telemetry import build_window
 
 
@@ -157,6 +157,12 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
             cfg=regime_cfg,
             h_norm=float(np.sum(np.abs(hamiltonian.coeffs))),
         )
+        diagnosis_observable = diagnose_observable(
+            window_improvement=float(window["improvement"]),
+            energy_std=float(window["energy"]["std"]),  # type: ignore[index]
+            grad_norm_last=float(window["grad_norm"]["last"]),  # type: ignore[index]
+            cfg=regime_cfg,
+        )
         record: Dict[str, Any] = {
             "kind": "window",
             "run_id": run["run_id"],
@@ -166,6 +172,7 @@ def run_one(run: Dict[str, Any], cfg: Dict[str, Any], handle) -> Dict[str, Any]:
             "gap": float(history[end_index]["energy"]) - e_min,
             "window": window,
             "diagnosis": diagnosis,
+            "diagnosis_observable": diagnosis_observable,
         }
         if end_index in label_ends:
             label_rng = np.random.default_rng(np.random.SeedSequence([run["seed"], 987_654, end_index]))

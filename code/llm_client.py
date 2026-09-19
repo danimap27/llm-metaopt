@@ -29,6 +29,7 @@ import time
 
 import requests
 
+from .init_strategies import INIT_DESCRIPTIONS
 from .regimes import REGIMES
 
 DECISION_SCHEMA: Dict[str, Any] = {
@@ -43,11 +44,12 @@ DECISION_SCHEMA: Dict[str, Any] = {
             "action": {
                 "type": "object",
                 "properties": {
-                    "eta_scale": {"enum": [None, 0.5, 1.0, 2.0]},
+                    "eta_scale": {"enum": [None, 0.5, 1.0, 2.0, 5.0]},
                     "noise_sigma": {"enum": [0.0, 0.05, 0.15]},
                     "restart": {"type": "boolean"},
+                    "reheat": {"type": "boolean"},
                 },
-                "required": ["eta_scale", "noise_sigma", "restart"],
+                "required": ["eta_scale", "noise_sigma", "restart", "reheat"],
                 "additionalProperties": False,
             },
         },
@@ -57,6 +59,12 @@ DECISION_SCHEMA: Dict[str, Any] = {
 }
 
 _REGIME_DESCRIPTIONS: Dict[str, str] = {
+    # Observable taxonomy (static block): decidable from the window alone.
+    "DESCENDING": "the energy is still decreasing meaningfully across the window",
+    "STALLED_NO_GRADIENT": "the energy is flat and the gradient estimate is also near zero",
+    "STALLED_WITH_GRADIENT": "the energy is flat but the gradient estimate is clearly non-zero",
+    "OSCILLATING": "the energy moves up and down without net progress",
+    # Distance-to-optimum taxonomy (kept for the drift block and the ceiling report).
     "CONVERGENCIA_OK": "the energy is at (or within tolerance of) the best reachable value",
     "BARREN_PLATEAU": "gradients are vanishingly small in every direction, so progress stalls far from the optimum",
     "MINIMO_LOCAL": "gradients are small and the window shows no improvement while the energy is still far from the optimum",
@@ -79,9 +87,11 @@ Regimes (choose exactly one):
 {regimes}
 
 Interventions (choose one action):
-- eta_scale: one of 0.5, 1.0 or 2.0 as a multiplier on the SPSA step size, or null to keep the current multiplier unchanged.
+- eta_scale: one of 0.5, 1.0, 2.0 or 5.0 as a multiplier on the SPSA step size, or null to keep the current multiplier unchanged.
 - noise_sigma: one of 0.0, 0.05 or 0.15, the standard deviation in radians of a one-shot Gaussian perturbation added to all angles; use it to break symmetries.
-- restart: full re-initialization of the angles. The action space is the same grid given to the classical controllers.
+- restart: full re-initialization of the angles.
+- reheat: restart the SPSA decay schedules from their initial values while keeping the current angles; use it when the step size has decayed too far to exploit a plateau exit.
+- The action space is the same grid given to the classical controllers.
 - expected_effect: the gap reduction you expect from your action over the next window, in energy units (negative if you expect a worsening).
 
 Rules: answer with JSON only, follow the schema, keep justification under two sentences and ground it in the numbers you were given. Prefer the least invasive action that can restore progress."""
@@ -209,22 +219,26 @@ def build_request_payload(
 # improvement probability and a Score for the expected gain in energy units.
 
 SYSTEMONE_ACTIONS: Dict[str, Dict[str, Any]] = {
-    "noop": {"eta_scale": None, "noise_sigma": 0.0, "restart": False},
-    "slow_down": {"eta_scale": 0.5, "noise_sigma": 0.0, "restart": False},
-    "speed_up": {"eta_scale": 2.0, "noise_sigma": 0.0, "restart": False},
-    "small_noise": {"eta_scale": None, "noise_sigma": 0.05, "restart": False},
-    "medium_noise": {"eta_scale": None, "noise_sigma": 0.15, "restart": False},
-    "speed_up_noise": {"eta_scale": 2.0, "noise_sigma": 0.05, "restart": False},
-    "restart": {"eta_scale": None, "noise_sigma": 0.0, "restart": True},
+    "noop": {"eta_scale": None, "noise_sigma": 0.0, "restart": False, "reheat": False},
+    "slow_down": {"eta_scale": 0.5, "noise_sigma": 0.0, "restart": False, "reheat": False},
+    "speed_up": {"eta_scale": 2.0, "noise_sigma": 0.0, "restart": False, "reheat": False},
+    "big_speed_up": {"eta_scale": 5.0, "noise_sigma": 0.0, "restart": False, "reheat": False},
+    "small_noise": {"eta_scale": None, "noise_sigma": 0.05, "restart": False, "reheat": False},
+    "medium_noise": {"eta_scale": None, "noise_sigma": 0.15, "restart": False, "reheat": False},
+    "speed_up_noise": {"eta_scale": 2.0, "noise_sigma": 0.05, "restart": False, "reheat": False},
+    "reheat": {"eta_scale": None, "noise_sigma": 0.0, "restart": False, "reheat": True},
+    "restart": {"eta_scale": None, "noise_sigma": 0.0, "restart": True, "reheat": False},
 }
 
 _SYSTEMONE_ACTION_DESCRIPTIONS: Dict[str, str] = {
     "noop": "leave everything unchanged",
     "slow_down": "halve the step size",
     "speed_up": "double the step size",
+    "big_speed_up": "quintuple the step size",
     "small_noise": "add a small Gaussian perturbation of 0.05 radians to all angles",
     "medium_noise": "add a Gaussian perturbation of 0.15 radians to all angles",
     "speed_up_noise": "double the step size and add a small perturbation",
+    "reheat": "restart the step-size schedules from their initial values, keeping the current angles",
     "restart": "reinitialize all angles",
 }
 
@@ -320,6 +334,80 @@ def parse_systemone_answers(data: Dict[str, Any], cfg: LLMConfig) -> Dict[str, A
     }
 
 
+def build_systemone_init_payload(problem: Dict[str, Any], cfg: LLMConfig) -> Dict[str, Any]:
+    """Warm-start request: pick an initialization strategy for the problem."""
+    return {
+        "state": json.dumps(problem, ensure_ascii=False, sort_keys=True),
+        "model": cfg.model,
+        "questions": {
+            "init_strategy": {
+                "type": "choice",
+                "instructions": (
+                    "Choose the initialization strategy for the variational angles "
+                    "that is most likely to reach a low final energy for this problem"
+                ),
+                "criteria": dict(INIT_DESCRIPTIONS),
+            },
+            "converges": {
+                "type": "noul",
+                "instructions": "This run will finish close to the best value this circuit family can reach",
+            },
+        },
+    }
+
+
+def decide_init(
+    problem: Dict[str, Any],
+    cfg: LLMConfig,
+    session: Optional[requests.Session] = None,
+) -> Dict[str, Any]:
+    """One System One call for the initialization choice (Engine B).
+
+    Returns ``{"ok": True, "strategy": ..., "probabilities": ..., "latency_s"}``
+    or the shared failure shape with ``ok: False``.
+    """
+    session = requests.Session() if session is None else session
+    url = cfg.base_url if cfg.base_url and "typesafe" in cfg.base_url else "https://api.typesafe.ai/v1/systemone"
+    key = cfg.api_key or os.environ.get("TYPESAFE_API_KEY", "")
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    payload = build_systemone_init_payload(problem, cfg)
+    started = time.perf_counter()
+    try:
+        response = session.post(url, json=payload, headers=headers, timeout=cfg.timeout)
+        latency = time.perf_counter() - started
+        response.raise_for_status()
+        data = response.json()
+        answers = data.get("answers") or {}
+        strategy_answer = answers.get("init_strategy") or {}
+        strategy = strategy_answer.get("choice")
+        if strategy not in INIT_DESCRIPTIONS:
+            raise ValueError(f"init strategy outside the offered set: {strategy!r}")
+        converges = (answers.get("converges") or {}).get("noul")
+        return {
+            "ok": True,
+            "model": data.get("model", cfg.model),
+            "strategy": strategy,
+            "probabilities": strategy_answer.get("probabilities"),
+            "converges_prob": converges,
+            "latency_s": time.perf_counter() - started,
+            "latency_successful_s": latency,
+        }
+    except Exception as exc:  # noqa: BLE001 - shared failure shape
+        return {
+            "ok": False,
+            "attempts": [
+                {
+                    "error": repr(exc),
+                    "latency_s": time.perf_counter() - started,
+                    "used_json_schema": True,
+                    "raw_snippet": "",
+                }
+            ],
+        }
+
+
 def _decide_systemone(
     window: Dict[str, Any],
     cfg: LLMConfig,
@@ -406,10 +494,11 @@ def parse_decision(text: str) -> Dict[str, Any]:
             raise ValueError(f"missing field {key!r} in action")
     if decision["diagnosis"] not in REGIMES:
         raise ValueError(f"diagnosis outside the allowed set: {decision['diagnosis']!r}")
-    if action["eta_scale"] is not None and action["eta_scale"] not in (0.5, 1.0, 2.0):
+    if action["eta_scale"] is not None and action["eta_scale"] not in (0.5, 1.0, 2.0, 5.0):
         raise ValueError(f"eta_scale {action['eta_scale']!r} is outside the action grid")
     if action["noise_sigma"] not in (0.0, 0.05, 0.15):
         raise ValueError(f"noise_sigma {action['noise_sigma']!r} is outside the action grid")
+    decision["action"]["reheat"] = bool(action.get("reheat", False))
     decision["action"]["eta_scale"] = None if action["eta_scale"] is None else float(action["eta_scale"])
     decision["action"]["noise_sigma"] = float(action["noise_sigma"])
     decision["action"]["restart"] = bool(action["restart"])

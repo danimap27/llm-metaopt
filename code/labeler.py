@@ -34,6 +34,7 @@ class Intervention:
     eta_scale: Optional[float] = None  # None keeps the current multiplier
     noise_sigma: float = 0.0
     restart: bool = False
+    reheat: bool = False  # reset the SPSA decay schedules, keep the angles
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
@@ -46,16 +47,21 @@ class Intervention:
             eta_scale=None if eta is None else float(eta),
             noise_sigma=float(payload.get("noise_sigma", 0.0)),
             restart=bool(payload.get("restart", False)),
+            reheat=bool(payload.get("reheat", False)),
         )
 
     @property
     def name(self) -> str:
+        if self.reheat and self.eta_scale is None and not self.restart and self.noise_sigma == 0:
+            return "reheat"
         base = "noop" if self.eta_scale is None else f"eta{self.eta_scale:g}"
         parts = [base]
         if self.noise_sigma > 0:
             parts.append(f"noise{self.noise_sigma:g}")
         if self.restart:
             parts.append("restart")
+        if self.reheat:
+            parts.append("reheat")
         return "_".join(parts)
 
 
@@ -63,14 +69,21 @@ NO_OP = Intervention()
 
 
 def default_candidates() -> List[Intervention]:
-    """Candidate grid: learning-rate scaling, thermal perturbation and restart."""
+    """Candidate grid: schedules, perturbations and the stall-escape levers.
+
+    v2 adds the larger step-size kick (eta x 5) and the schedule reheat, the
+    two standard stochastic-approximation escape levers that were missing.
+    The grid is identical for every controller, including the oracle.
+    """
     return [
         NO_OP,
         Intervention(eta_scale=0.5),
         Intervention(eta_scale=2.0),
+        Intervention(eta_scale=5.0),
         Intervention(noise_sigma=0.05),
         Intervention(noise_sigma=0.15),
         Intervention(restart=True),
+        Intervention(reheat=True),
         Intervention(eta_scale=2.0, noise_sigma=0.15),
     ]
 
@@ -108,7 +121,9 @@ def evaluate_candidate(
         eta_scale=1.0 if action.eta_scale is None else action.eta_scale,
         steps=lookahead,
         rng=r_rng,
-        k_offset=k_offset,
+        # A reheat resets the schedules, so the rollout must start its own
+        # decay clock instead of continuing the deployed one.
+        k_offset=0 if action.reheat else k_offset,
     )
     final_energy = float(out["final_energy"])
     return {
