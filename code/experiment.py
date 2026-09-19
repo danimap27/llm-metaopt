@@ -225,6 +225,14 @@ def run_closed_loop(
                     "n_attempts": response.get("n_attempts"),
                 }
             )
+            for extra in (
+                "diagnosis_probabilities",
+                "action_probabilities",
+                "improvement_probability",
+                "action_name",
+            ):
+                if payload.get(extra) is not None:
+                    event[extra] = payload[extra]
         else:
             llm_failures += 1
             llm_latency_total += sum(
@@ -341,6 +349,14 @@ def run_closed_loop(
                             "latency_s": response["latency_s"],
                             "n_attempts": response.get("n_attempts"),
                         }
+                        for extra in (
+                            "diagnosis_probabilities",
+                            "action_probabilities",
+                            "improvement_probability",
+                            "action_name",
+                        ):
+                            if payload.get(extra) is not None:
+                                info[extra] = payload[extra]
                     else:
                         llm_failures += 1
                         llm_latency_total += sum(
@@ -488,7 +504,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--llm-timeout", type=float, default=None)
     parser.add_argument("--llm-max-tokens", type=int, default=None)
     parser.add_argument("--llm-no-think", action="store_true", help="force the /no_think hint")
-    parser.add_argument("--llm-api-style", default=None, choices=["openai", "ollama"])
+    parser.add_argument("--llm-api-style", default=None, choices=["openai", "ollama", "systemone"])
     parser.add_argument("--cache", default=None, help="response cache path (enables replay)")
     parser.add_argument("--replay", action="store_true", help="serve every call from the cache")
     parser.add_argument("--mock-llm", action="store_true", help="use the heuristic controller instead of the LLM (offline smoke test)")
@@ -521,7 +537,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     policy = load_policy(pathlib.Path(args.policy)) if args.policy else None
     llm_defaults = cfg.get("llm", {}) or {}
-    llm_base_url = args.llm_base_url or llm_defaults.get("base_url", "http://127.0.0.1:11434/v1")
+    llm_api_style = str(args.llm_api_style or llm_defaults.get("api_style", "openai"))
+    default_base_url = (
+        "https://api.typesafe.ai/v1/systemone"
+        if llm_api_style == "systemone"
+        else "http://127.0.0.1:11434/v1"
+    )
+    llm_base_url = args.llm_base_url or llm_defaults.get("base_url", default_base_url)
     llm_model = args.llm_model or llm_defaults.get("model", "qwen3.5:4b")
     cache_path = args.cache if args.cache is not None else llm_defaults.get("cache")
     replay = bool(args.replay or llm_defaults.get("replay", False))

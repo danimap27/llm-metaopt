@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 import json
+import os
 import re
 import time
 
@@ -201,6 +202,171 @@ def build_request_payload(
     return payload
 
 
+# --------------------------------------------------------------- systemone
+# TypeSafe System One (Jev): typed questions answered with probabilities,
+# instead of generated text. The decision contract is identical, expressed as
+# a Choice over the regimes, a Choice over the action grid, a Noul for the
+# improvement probability and a Score for the expected gain in energy units.
+
+SYSTEMONE_ACTIONS: Dict[str, Dict[str, Any]] = {
+    "noop": {"eta_scale": None, "noise_sigma": 0.0, "restart": False},
+    "slow_down": {"eta_scale": 0.5, "noise_sigma": 0.0, "restart": False},
+    "speed_up": {"eta_scale": 2.0, "noise_sigma": 0.0, "restart": False},
+    "small_noise": {"eta_scale": None, "noise_sigma": 0.05, "restart": False},
+    "medium_noise": {"eta_scale": None, "noise_sigma": 0.15, "restart": False},
+    "speed_up_noise": {"eta_scale": 2.0, "noise_sigma": 0.05, "restart": False},
+    "restart": {"eta_scale": None, "noise_sigma": 0.0, "restart": True},
+}
+
+_SYSTEMONE_ACTION_DESCRIPTIONS: Dict[str, str] = {
+    "noop": "leave everything unchanged",
+    "slow_down": "halve the step size",
+    "speed_up": "double the step size",
+    "small_noise": "add a small Gaussian perturbation of 0.05 radians to all angles",
+    "medium_noise": "add a Gaussian perturbation of 0.15 radians to all angles",
+    "speed_up_noise": "double the step size and add a small perturbation",
+    "restart": "reinitialize all angles",
+}
+
+# Anchors of the expected-gain Score question, in energy units. The score is
+# continuous on the 0..4 index scale and is interpolated between anchors.
+_GAIN_ANCHORS = (0.0, 0.1, 0.5, 1.0, 5.0)
+_GAIN_CRITERIA = [
+    "0 - no improvement",
+    "0.1 - small improvement",
+    "0.5 - moderate improvement",
+    "1.0 - large improvement",
+    "5.0 - huge improvement",
+]
+
+
+def build_systemone_payload(window: Dict[str, Any], cfg: LLMConfig) -> Dict[str, Any]:
+    """System One request for the slow-loop decision over a telemetry window."""
+    return {
+        "state": json.dumps(window, ensure_ascii=False, sort_keys=True),
+        "model": cfg.model,
+        "questions": {
+            "regime": {
+                "type": "choice",
+                "instructions": "Diagnose the optimization regime of this telemetry window",
+                "criteria": {name: _REGIME_DESCRIPTIONS[name] for name in cfg.regimes},
+            },
+            "action": {
+                "type": "choice",
+                "instructions": "Choose one intervention for the fast SPSA optimizer",
+                "criteria": dict(_SYSTEMONE_ACTION_DESCRIPTIONS),
+            },
+            "improve_prob": {
+                "type": "noul",
+                "instructions": "The energy gap will improve over the next window of optimization steps",
+            },
+            "expected_gain": {
+                "type": "score",
+                "instructions": "Expected gap reduction in energy units over the next window",
+                "criteria": list(_GAIN_CRITERIA),
+            },
+        },
+    }
+
+
+def _linear_gain(score: float) -> float:
+    s = float(score)
+    if s <= 0.0:
+        return _GAIN_ANCHORS[0]
+    if s >= len(_GAIN_ANCHORS) - 1:
+        return _GAIN_ANCHORS[-1]
+    index = int(s)
+    fraction = s - index
+    return _GAIN_ANCHORS[index] + fraction * (_GAIN_ANCHORS[index + 1] - _GAIN_ANCHORS[index])
+
+
+def parse_systemone_answers(data: Dict[str, Any], cfg: LLMConfig) -> Dict[str, Any]:
+    """Map a System One response onto the benchmark decision contract."""
+    answers = data.get("answers") or {}
+    regime = answers.get("regime") or {}
+    diagnosis = regime.get("choice")
+    if diagnosis not in cfg.regimes:
+        raise ValueError(f"diagnosis outside the offered set: {diagnosis!r}")
+    action_answer = answers.get("action") or {}
+    action_name = action_answer.get("choice")
+    if action_name not in SYSTEMONE_ACTIONS:
+        raise ValueError(f"action outside the offered grid: {action_name!r}")
+    improve = answers.get("improve_prob") or {}
+    improve_prob = improve.get("noul")
+    gain = answers.get("expected_gain") or {}
+    score = gain.get("score")
+    if score is None:
+        raise ValueError("no score returned for expected_gain")
+    regime_probs = regime.get("probabilities")
+    action_probs = action_answer.get("probabilities")
+
+    def _prob(probs: Any, key: str) -> Optional[float]:
+        return float(probs[key]) if isinstance(probs, dict) and key in probs else None
+
+    justification = (
+        f"systemone: P(regime)={_prob(regime_probs, diagnosis)}, "
+        f"P(action)={_prob(action_probs, action_name)}, P(improve)={improve_prob}"
+    )
+    return {
+        "diagnosis": diagnosis,
+        "justification": justification,
+        "expected_effect": float(_linear_gain(score)),
+        "action": dict(SYSTEMONE_ACTIONS[action_name]),
+        "action_name": action_name,
+        "diagnosis_probabilities": regime_probs,
+        "action_probabilities": action_probs,
+        "improvement_probability": improve_prob,
+        "gain_score": float(score),
+    }
+
+
+def _decide_systemone(
+    window: Dict[str, Any],
+    cfg: LLMConfig,
+    session: Optional[requests.Session],
+) -> Dict[str, Any]:
+    session = requests.Session() if session is None else session
+    url = cfg.base_url if cfg.base_url and "typesafe" in cfg.base_url else "https://api.typesafe.ai/v1/systemone"
+    key = cfg.api_key or os.environ.get("TYPESAFE_API_KEY", "")
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    payload = build_systemone_payload(window, cfg)
+    started = time.perf_counter()
+    try:
+        response = session.post(url, json=payload, headers=headers, timeout=cfg.timeout)
+        latency = time.perf_counter() - started
+        response.raise_for_status()
+        data = response.json()
+        decision = parse_systemone_answers(data, cfg)
+        return {
+            "ok": True,
+            "model": data.get("model", cfg.model),
+            "api_style": "systemone",
+            "latency_s": time.perf_counter() - started,
+            "latency_successful_s": latency,
+            "n_attempts": 1,
+            "decision": decision,
+            "raw": json.dumps(data, ensure_ascii=False)[:2000],
+            "usage": data.get("usage"),
+            "used_json_schema": True,
+        }
+    except Exception as exc:  # noqa: BLE001 - failure shape matches the JSON dialects
+        return {
+            "ok": False,
+            "model": cfg.model,
+            "api_style": "systemone",
+            "attempts": [
+                {
+                    "error": repr(exc),
+                    "latency_s": time.perf_counter() - started,
+                    "used_json_schema": True,
+                    "raw_snippet": "",
+                }
+            ],
+        }
+
+
 def extract_content(data: Dict[str, Any], cfg: LLMConfig) -> tuple[str, str, Optional[Dict[str, Any]]]:
     """Return ``(content, reasoning, usage)`` from either response shape."""
     if cfg.api_style == "ollama":
@@ -261,8 +427,11 @@ def decide(
 
     Three variants are attempted in order: the strict JSON schema, a plain JSON
     mode and no structured output at all, so a weaker server still yields a
-    parsable answer. Latency is always measured around the POST.
+    parsable answer. Latency is always measured around the POST. The
+    ``systemone`` style is a single typed-question request instead.
     """
+    if cfg.api_style == "systemone":
+        return _decide_systemone(window, cfg, session)
     session = requests.Session() if session is None else session
     url = endpoint_url(cfg)
     headers = {"Content-Type": "application/json"}
