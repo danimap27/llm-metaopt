@@ -76,13 +76,16 @@ def test_reheat_resets_the_decay_schedule(monkeypatch) -> None:
     )
     events = result["events"]
     assert any(event["action"].get("reheat") for event in events)
-    # After the first reheat at step 10 the schedule restarts: the step size
-    # jumps up at step 11 and decays again from there.
+    # The reheat lands at the window boundary k=10, so step 10 already uses the
+    # fresh schedule: the step size jumps up from step 9 to step 10 and decays
+    # again from there.
     a_k = result["a_k_curve"]
-    assert a_k[11] > a_k[10]
-    assert a_k[12] < a_k[11]
-    a_expected, _ = schedules(cfg, 1, 1.0)
-    assert a_k[11] == pytest.approx(a_expected, rel=1e-9)
+    a_fresh, _ = schedules(cfg, 0, 1.0)
+    a_next, _ = schedules(cfg, 1, 1.0)
+    assert a_k[10] > a_k[9]
+    assert a_k[10] == pytest.approx(a_fresh, rel=1e-9)
+    assert a_k[11] < a_k[10]
+    assert a_k[11] == pytest.approx(a_next, rel=1e-9)
 
 
 def test_reheat_event_records_the_shift(monkeypatch) -> None:
