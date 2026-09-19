@@ -160,3 +160,26 @@ of the cost-benefit table, so the measurements feed C4 directly. An incidental
 observation for the calibration analysis: the same window received different
 diagnoses from different models (`CONVERGENCIA_OK` versus `MINIMO_LOCAL`),
 which is the miscalibration the calibration curve is meant to quantify.
+
+## MSI Prestige measurements (Ryzen AI 9 HX 370, CPU, 2026-09-19)
+
+The same probe and breakdown were run against the MSI desktop through the
+existing homelab-to-MSI Ollama tunnel, serving `gemma3:4b` from the user-level
+Ollama (`~/.ollama`).
+
+| Configuration | Wall, warm | Note |
+|---|---|---|
+| `gemma3:4b`, raw endpoint | 3.07 s | 22.6 tok/s decode; cold call 8.35 s (load 4.25 s from disk plus prefill 1.26 s) |
+| `gemma3:4b`, adapter, compact criteria | 4.8-6.7 s | full answer envelope, same two questions as the homelab runs |
+| `qwen3.5:4b`, adapter | not viable | the model emits its thinking into `reasoning` before the answer; through the chat-completions path the adapter burns the budget and stalls |
+
+The MSI decodes about 2.5 times faster than the homelab (22.6 versus 8.9
+tokens per second on the same 4B model), so a 4B answer on the MSI costs
+roughly what a 1B answer costs on the homelab. Both remain one to two orders
+above the hundred-millisecond class, which confirms that the serving node,
+not model tuning, is where the latency reduction lives. The Radeon 890M is
+unused (the Arch Ollama package ships no ROCm or Vulkan libraries); enabling
+a GPU backend there would need a different package and sudo, and is noted as
+an option rather than worked around. The user-level `ollama serve` on the MSI
+was started for these measurements and left running; stop it with
+`pkill -f "ollama serve"` on the MSI if the machine is needed idle.
