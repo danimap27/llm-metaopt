@@ -28,13 +28,28 @@ advance and cannot be tuned to the results.
 | `spsa_oracle` | best counterfactual action (simulator) | Upper bound, not deployable; spends about 13x the quantum budget, recorded per run |
 | `spsa_llm` | LLM with the JSON telemetry window | The proposed method, synchronous: the fast loop is blocked during the call |
 | `spsa_llm_async` | same, but the fast loop keeps running | The action is applied to the state that exists when the response lands; each event records `staleness_steps`. Together with `spsa_llm` it measures the sync-versus-async trade-off that the cost-benefit claim rests on |
+| `spsa_llm_gate` | LLM, called only when the window is not progressing | Engine A: the call is skipped when the window improvement exceeds `gate_improvement`, so the latency budget is spent where it can pay |
+| `spsa_gate_restart` | the same gate with a fixed restart action | The classical reference under the same spending rule |
+| `spsa_llm_init` | LLM picks the initialization strategy (one call at step 0) | Engine B warm start; the choice is recorded in the run metadata |
+| `spsa_init_random` | uniform random strategy | Classical control for the warm start |
+| `spsa_init_fixed` | the configured fixed strategy | Best-fixed control once the offline screen picks it |
+
+Action grid v2 (identical for every controller including the oracle):
+`noop`, `eta_scale` in {0.5, 2.0, 5.0}, `noise_sigma` in {0.05, 0.15},
+`restart`, `reheat` (reset the SPSA decay clocks, keep the angles) and
+`eta_scale=2.0` with `noise_sigma=0.15`. The static block uses the observable
+diagnosis taxonomy (`DESCENDING`, `STALLED_NO_GRADIENT`,
+`STALLED_WITH_GRADIENT`, `OSCILLATING`), decidable from the window the
+controller receives; the distance-to-optimum taxonomy is still recorded and
+reported as the identifiability ceiling.
 
 All classical controllers and the LLM see exactly the same flattened
-telemetry window and choose from exactly the same seven-point action grid
-(`eta_scale` in {0.5, 1.0, 2.0 or keep}, `noise_sigma` in {0.0, 0.05, 0.15},
-optional restart). An intervention whose safeguard window closes with a worse
-gap than at the decision point is reverted for every condition alike, and
-each run records `n_reverted` and `n_energy_evals`.
+telemetry window and choose from exactly the same nine-point action grid
+(`eta_scale` in {0.5, 2.0, 5.0 or keep}, `noise_sigma` in {0.05, 0.15},
+optional restart, optional reheat, and the combined variant). An intervention
+whose safeguard window closes with a worse gap than at the decision point is
+reverted for every condition alike, and each run records `n_reverted` and
+`n_energy_evals`.
 
 Every condition shares the seed, the initial angles and the Rademacher
 perturbation stream of the fast loop. Controllers draw from a separate RNG
