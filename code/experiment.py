@@ -436,8 +436,9 @@ def run_closed_loop(
                     "energy_pre": energy_pre,
                     "theta_snapshot": None if is_noop else theta_snapshot.tolist(),
                     # The raw window is stored for LLM runs so the occlusion
-                    # battery in code.analysis can replay each call field by field.
-                    "window": window if condition == "spsa_llm" else None,
+                    # battery in code.analysis can replay each call field by
+                    # field, and the diagnosis probe can score exact windows.
+                    "window": window if condition in ("spsa_llm", "spsa_llm_gate", "spsa_llm_async") else None,
                     "is_noop": is_noop,
                     **info,
                 }
