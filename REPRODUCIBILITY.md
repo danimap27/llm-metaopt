@@ -20,8 +20,10 @@ Pinned versions used for the reference runs are recorded in
 .venv/bin/python -m code.experiment --config configs/default.yaml --out results/experiment.jsonl \
     --llm-base-url http://localhost:11434/v1 --llm-model qwen3.5:4b
 
-# 3. Offline smoke test of the same pipeline (no endpoint, heuristic controller)
-.venv/bin/python -m code.experiment --config configs/default.yaml --mock-llm --limit 6 --out results/ci.jsonl
+# 3. Offline smoke test of the same pipeline (no endpoint, heuristic controller).
+#    Policy arms (spsa_policy, spsa_effect) need a trained artifact kept outside
+#    the repository, so the smoke pins a policy-free condition list.
+.venv/bin/python -m code.experiment --config configs/default.yaml --mock-llm --conditions spsa,spsa_random,spsa_heuristic,spsa_oracle,spsa_llm,spsa_init_random,spsa_init_fixed --limit 6 --out results/ci.jsonl
 
 # 4. Tables
 .venv/bin/python -m code.aggregate --results results/experiment.jsonl --out results/tables

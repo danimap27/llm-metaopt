@@ -19,6 +19,11 @@ jobs:
       - name: Unit and smoke tests
         run: python -m pytest tests/ -q
       - name: Closed-loop smoke run (mock LLM, no endpoint needed)
-        run: python -m code.experiment --config configs/default.yaml --mock-llm --limit 6 --out results/ci.jsonl
+        # Policy arms (spsa_policy, spsa_effect) need a trained artifact that is
+        # not part of the repository; the offline smoke pins a policy-free list.
+        run: >
+          python -m code.experiment --config configs/default.yaml --mock-llm
+          --conditions spsa,spsa_random,spsa_heuristic,spsa_oracle,spsa_llm,spsa_init_random,spsa_init_fixed
+          --limit 6 --out results/ci.jsonl
       - name: Aggregate smoke run
         run: python -m code.aggregate --results results/ci.jsonl --out results/tables
